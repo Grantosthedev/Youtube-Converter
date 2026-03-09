@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://*.ytimg.com https://*.ggpht.com https://i.ytimg.com; style-src 'self' 'unsafe-inline'; font-src 'self';">
+  <title>DL Buddy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+
+    <!-- Activity Card (fixed top-right) -->
+    <div id="activityCard" class="activity-card">
+      <div id="activityContent" class="activity-content">
+        <span id="activityLabel" class="activity-label">Ready</span>
+        <div id="activityBar" class="activity-bar">
+          <div id="activityFill" class="activity-bar__fill"></div>
+        </div>
+        <span id="activityDetail" class="activity-detail"></span>
+      </div>
+    </div>
+
+    <!-- Spacer top -->
+    <div class="spacer"></div>
+
+    <!-- Path Display (clickable, right-aligned) -->
+    <div id="pathDisplay" class="path-display" title="">~/Downloads/YT Clips</div>
+
+    <!-- Unified URL + Download row -->
+    <div class="url-row">
+      <input
+        type="text"
+        id="urlInput"
+        class="url-input"
+        placeholder="Paste YouTube URL or drag & drop"
+        spellcheck="false"
+        autocomplete="off"
+      >
+      <button id="urlClear" class="url-input-clear" aria-label="Clear URL">✕</button>
+      <button id="downloadBtn" class="btn-download" disabled>Download</button>
+      <button id="cancelBtn" class="btn-cancel" style="opacity:0;pointer-events:none;position:absolute;visibility:hidden;">Cancel</button>
+    </div>
+    <div id="urlHint" class="url-hint"></div>
+
+    <!-- Controls row: time range (left) + quality selector (right) -->
+    <div class="controls-row">
+      <div class="clip-range">
+        <input type="text" id="startTime" class="time-input" placeholder="00:00:00" value="00:00:00" disabled>
+        <span class="clip-range__separator">to</span>
+        <input type="text" id="endTime" class="time-input" placeholder="00:00:00" value="00:00:00" disabled>
+      </div>
+      <div id="qualitySelector" class="quality-bar">
+        <div class="pill-indicator" id="pillIndicator"></div>
+        <button class="quality-option active" data-quality="best">Best / 4K</button>
+        <button class="quality-option" data-quality="hd">HD 1080p</button>
+        <button class="quality-option" data-quality="audio">Audio Only</button>
+      </div>
+    </div>
+
+    <!-- Video Info Card (below controls) -->
+    <div id="videoCard" class="video-card">
+      <img id="videoThumb" class="video-card__thumb" alt="" src="">
+      <div class="video-card__info">
+        <div id="videoTitle" class="video-card__title"></div>
+        <div id="videoMeta" class="video-card__meta"></div>
+        <div id="videoQualities" class="video-card__qualities"></div>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div id="progressWrapper" class="progress-wrapper">
+      <div class="progress-bar">
+        <div id="progressFill" class="progress-bar__fill"></div>
+      </div>
+      <div class="progress-info">
+        <span id="progressPercent">0%</span>
+        <span id="progressSpeed"></span>
+      </div>
+    </div>
+
+    <!-- Status Message -->
+    <div id="statusMessage" class="status-message">
+      <span class="status-message__icon" id="statusIcon"></span>
+      <span class="status-message__text" id="statusText"></span>
+    </div>
+
+    <!-- Last Download -->
+    <div id="lastDownload" class="last-download">
+      <span class="last-download__name" id="lastDownloadName"></span>
+      <button id="revealBtn" class="btn-reveal">Show File</button>
+    </div>
+
+    <!-- Spacer bottom -->
+    <div class="spacer"></div>
+
+    <!-- Settings backdrop (covers drag region for click-outside dismiss) -->
+    <div id="settingsBackdrop" class="settings-backdrop"></div>
+
+    <!-- Settings gear (fixed bottom-left) -->
+    <div class="settings-anchor">
+      <button id="settingsBtn" class="settings-btn" aria-label="Settings">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+          <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M16.167 12.5a1.375 1.375 0 00.275 1.517l.05.05a1.667 1.667 0 11-2.359 2.358l-.05-.05a1.375 1.375 0 00-1.516-.275 1.375 1.375 0 00-.834 1.258v.142a1.667 1.667 0 11-3.333 0v-.075a1.375 1.375 0 00-.9-1.258 1.375 1.375 0 00-1.517.275l-.05.05a1.667 1.667 0 11-2.358-2.359l.05-.05a1.375 1.375 0 00.275-1.516 1.375 1.375 0 00-1.258-.834h-.142a1.667 1.667 0 010-3.333h.075a1.375 1.375 0 001.258-.9 1.375 1.375 0 00-.275-1.517l-.05-.05A1.667 1.667 0 115.892 3.508l.05.05a1.375 1.375 0 001.516.275h.067a1.375 1.375 0 00.833-1.258v-.142a1.667 1.667 0 013.334 0v.075a1.375 1.375 0 00.833 1.258 1.375 1.375 0 001.517-.275l.05-.05a1.667 1.667 0 112.358 2.359l-.05.05a1.375 1.375 0 00-.275 1.516v.067a1.375 1.375 0 001.258.833h.142a1.667 1.667 0 010 3.334h-.075a1.375 1.375 0 00-1.258.833z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <div id="settingsPopover" class="settings-popover">
+        <div class="settings-row">
+          <span class="settings-label">Auto-paste</span>
+          <button id="autoPasteToggle" class="toggle" aria-label="Toggle auto-paste">
+            <span class="toggle__knob"></span>
+          </button>
+        </div>
+        <button id="historyBtn" class="settings-action-btn">History</button>
+        <div class="settings-divider"></div>
+        <div class="settings-row">
+          <button id="updateYtdlpBtn" class="settings-update-btn">Update</button>
+          <span id="appVersion" class="settings-version"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logo (fixed bottom-right) -->
+    <div class="logo-anchor">
+      <img src="logo-text.svg" alt="DL Buddy" class="logo-text" draggable="false">
+    </div>
+
+    <!-- Drag & Drop Overlay -->
+    <div id="dropOverlay" class="drop-overlay">
+      <div class="drop-overlay__content">Drop YouTube URL here</div>
+    </div>
+
+  </div>
+
+  <!-- History View (full-screen overlay, outside .app) -->
+  <div id="historyView" class="history-view">
+    <div class="history-header">
+      <button id="historyBack" class="history-back" aria-label="Back">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+          <path d="M12.5 15l-5-5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <span class="history-title">Download History</span>
+      <button id="historyClearBtn" class="history-clear-btn">Clear All</button>
+    </div>
+
+    <div class="history-toolbar">
+      <div class="history-search-wrap">
+        <input type="text" id="historySearch" class="history-search" placeholder="Search title, channel, URL..." spellcheck="false" autocomplete="off">
+      </div>
+      <div class="history-filters">
+        <button class="history-filter active" data-filter="all">All</button>
+        <button class="history-filter" data-filter="video">Video</button>
+        <button class="history-filter" data-filter="audio">Audio</button>
+      </div>
+    </div>
+
+    <div class="history-sort-row">
+      <span id="historyCount" class="history-count">0 downloads</span>
+      <button id="historySortBtn" class="history-sort-btn" data-sort="newest">Newest first</button>
+    </div>
+
+    <div id="historyList" class="history-list"></div>
+
+    <div id="historyEmpty" class="history-empty">
+      <span>No downloads yet</span>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
