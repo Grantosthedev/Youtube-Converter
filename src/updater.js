@@ -7,8 +7,14 @@ const YTDLP_DOWNLOAD_BASE = 'https://github.com/yt-dlp/yt-dlp/releases/latest/do
 
 const APP_REPO_API = 'https://api.github.com/repos/Grantosthedev/Youtube-Converter/releases/latest';
 
-function githubGet(url) {
+const MAX_REDIRECTS = 5;
+
+function githubGet(url, redirectCount = 0) {
   return new Promise((resolve, reject) => {
+    if (redirectCount >= MAX_REDIRECTS) {
+      reject(new Error('Too many redirects'));
+      return;
+    }
     https.get(url, {
       headers: {
         'User-Agent': 'YouTube-Clip-Downloader',
@@ -16,7 +22,7 @@ function githubGet(url) {
       },
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        githubGet(res.headers.location).then(resolve).catch(reject);
+        githubGet(res.headers.location, redirectCount + 1).then(resolve).catch(reject);
         return;
       }
       let data = '';
@@ -38,9 +44,15 @@ function githubGet(url) {
 
 function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
+    let redirects = 0;
     const follow = (u) => {
+      if (redirects >= MAX_REDIRECTS) {
+        reject(new Error('Too many redirects'));
+        return;
+      }
       https.get(u, { headers: { 'User-Agent': 'YouTube-Clip-Downloader' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          redirects++;
           follow(res.headers.location);
           return;
         }
@@ -49,6 +61,10 @@ function downloadFile(url, destPath) {
           return;
         }
         const file = fs.createWriteStream(destPath);
+        res.on('error', (err) => {
+          file.close();
+          reject(err);
+        });
         res.pipe(file);
         file.on('finish', () => {
           file.close();
@@ -105,11 +121,23 @@ async function updateYtdlp() {
   }
 }
 
+function isNewerVersion(latest, current) {
+  const a = latest.split('.').map(Number);
+  const b = current.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
 async function checkAppUpdate(currentVersion) {
   try {
     const release = await githubGet(APP_REPO_API);
-    const latestVersion = release.tag_name.replace(/^v/, '');
-    if (latestVersion !== currentVersion) {
+    const latestVersion = release.tag_name.replace(/^v/, '').trim();
+    if (isNewerVersion(latestVersion, currentVersion)) {
       return {
         available: true,
         version: latestVersion,

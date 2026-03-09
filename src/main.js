@@ -21,6 +21,7 @@ const videoInfoCache = new Map();
 
 let mainWindow = null;
 let activeDownloadProcess = null;
+let downloadCancelled = false;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -68,8 +69,10 @@ function createWindow() {
   });
 
   mainWindow.on('resize', () => {
-    const bounds = mainWindow.getBounds();
-    store.set('windowBounds', { width: bounds.width, height: bounds.height });
+    try {
+      const bounds = mainWindow.getBounds();
+      store.set('windowBounds', { width: bounds.width, height: bounds.height });
+    } catch { /* ignore persist errors */ }
   });
 
   mainWindow.on('closed', () => {
@@ -77,50 +80,65 @@ function createWindow() {
   });
 }
 
-function ensureDownloadDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
-
 // --- IPC Handlers ---
 
 ipcMain.handle('fetch-video-info', async (_event, url) => {
   if (!isValidYouTubeURL(url)) {
-    throw new Error('Please enter a valid YouTube URL.');
+    throw new Error('YOU ABSOLUTE BUFFOON, that\'s not a YouTube URL. Paste a real fucking link before I scream.');
   }
   const normalized = normalizeYouTubeURL(url);
   const info = await fetchVideoInfo(normalized);
   if (info.isLive) {
-    throw new Error('Live streams cannot be clipped. Wait until the stream ends.');
+    throw new Error('Live streams can\'t be clipped, you impatient nincompoop. Wait for the stream to end like everyone else.');
+  }
+  if (videoInfoCache.size > 50) {
+    const oldest = videoInfoCache.keys().next().value;
+    videoInfoCache.delete(oldest);
   }
   videoInfoCache.set(normalized, info);
   return info;
 });
 
+const VALID_QUALITIES = new Set(['best', 'hd', 'audio']);
+const TIME_FORMAT = /^\d{2}:\d{2}:\d{2}$/;
+
 ipcMain.handle('start-download', async (event, options) => {
+  if (!options || typeof options !== 'object') {
+    throw new Error('Invalid download options, you inept noodle.');
+  }
+  if (!isValidYouTubeURL(options.url)) {
+    throw new Error('YOU ABSOLUTE BUFFOON, that\'s not a YouTube URL. Paste a real fucking link before I scream.');
+  }
+  if (options.quality && !VALID_QUALITIES.has(options.quality)) {
+    throw new Error('Invalid quality setting, you thick as a brick.');
+  }
+  if (options.startTime && !TIME_FORMAT.test(options.startTime)) {
+    throw new Error('Invalid start time format, you numbskull.');
+  }
+  if (options.endTime && !TIME_FORMAT.test(options.endTime)) {
+    throw new Error('Invalid end time format, you clown.');
+  }
+
   const downloadPath = options.outputPath || store.get('downloadPath');
 
   if (!pathExists(downloadPath)) {
     try {
       fs.mkdirSync(downloadPath, { recursive: true });
     } catch {
-      throw new Error('Cannot save to this folder. Choose a different location.');
+      throw new Error('Cannot save to this folder, you clumsy oaf. Pick another goddamn folder.');
     }
   }
 
   const freeSpace = await checkDiskSpace(downloadPath);
   if (freeSpace < 100 * 1024 * 1024) {
-    throw new Error('Not enough disk space. Free up space or choose another drive.');
+    throw new Error('Disk space is fucking cooked, you fun vampire. Free some space or switch drives.');
   }
 
   try {
     fs.accessSync(downloadPath, fs.constants.W_OK);
   } catch {
-    throw new Error('Cannot save to this folder. Choose a different location.');
+    throw new Error('Cannot save to this folder, you clumsy oaf. Pick another goddamn folder.');
   }
-
-  ensureDownloadDir(downloadPath);
 
   const downloadOptions = {
     url: normalizeYouTubeURL(options.url),
@@ -130,6 +148,8 @@ ipcMain.handle('start-download', async (event, options) => {
     outputPath: downloadPath,
     title: options.title || 'download',
   };
+
+  downloadCancelled = false;
 
   return new Promise((resolve, reject) => {
     activeDownloadProcess = startDownload(
@@ -174,6 +194,7 @@ ipcMain.handle('start-download', async (event, options) => {
 
         const history = store.get('downloadHistory');
         history.unshift(historyEntry);
+        if (history.length > 500) history.length = 500;
         store.set('downloadHistory', history);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -182,8 +203,8 @@ ipcMain.handle('start-download', async (event, options) => {
 
         if (Notification.isSupported()) {
           const notif = new Notification({
-            title: 'Download Complete',
-            body: cachedInfo.title || path.basename(filePath || 'Video downloaded successfully'),
+            title: 'Download Complete, You Lucky Buffoon',
+            body: cachedInfo.title || path.basename(filePath || 'Video downloaded somehow'),
             silent: false,
             actions: [{ type: 'button', text: 'Show File' }],
           });
@@ -200,14 +221,21 @@ ipcMain.handle('start-download', async (event, options) => {
       },
       (errorMsg) => {
         activeDownloadProcess = null;
+
+        if (downloadCancelled) {
+          downloadCancelled = false;
+          resolve({ cancelled: true });
+          return;
+        }
+
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('download-error', { error: errorMsg });
         }
 
         if (Notification.isSupported()) {
           const notif = new Notification({
-            title: 'Download Failed',
-            body: errorMsg || 'Something went wrong.',
+            title: 'Download Failed, You Bungling Fool',
+            body: errorMsg || 'Something went wrong, you numbskull.',
             silent: false,
           });
           notif.on('click', () => {
@@ -227,6 +255,7 @@ ipcMain.handle('start-download', async (event, options) => {
 
 ipcMain.handle('cancel-download', async () => {
   if (activeDownloadProcess) {
+    downloadCancelled = true;
     activeDownloadProcess.kill('SIGTERM');
     activeDownloadProcess = null;
     return { cancelled: true };
@@ -235,11 +264,14 @@ ipcMain.handle('cancel-download', async () => {
 });
 
 ipcMain.handle('select-folder', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const dialogOpts = {
     properties: ['openDirectory', 'createDirectory'],
-    title: 'Choose Download Folder',
+    title: 'Choose Download Folder, You Party Pooper',
     defaultPath: store.get('downloadPath'),
-  });
+  };
+  const result = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showOpenDialog(mainWindow, dialogOpts)
+    : await dialog.showOpenDialog(dialogOpts);
   if (!result.canceled && result.filePaths.length > 0) {
     const selected = result.filePaths[0];
     store.set('downloadPath', selected);
@@ -249,11 +281,15 @@ ipcMain.handle('select-folder', async () => {
 });
 
 ipcMain.handle('reveal-in-finder', async (_event, filePath) => {
-  if (filePath && fs.existsSync(filePath)) {
-    shell.showItemInFolder(filePath);
-    return { found: true };
+  const downloadDir = path.resolve(store.get('downloadPath'));
+  if (filePath) {
+    const resolved = path.resolve(filePath);
+    if (resolved.startsWith(downloadDir) && fs.existsSync(resolved)) {
+      shell.showItemInFolder(resolved);
+      return { found: true };
+    }
   }
-  shell.openPath(store.get('downloadPath'));
+  shell.openPath(downloadDir);
   return { found: false };
 });
 
@@ -265,7 +301,10 @@ ipcMain.handle('get-settings', async () => {
   };
 });
 
+const ALLOWED_SETTINGS = new Set(['quality', 'autoPaste', 'downloadPath']);
+
 ipcMain.handle('set-setting', async (_event, key, value) => {
+  if (!ALLOWED_SETTINGS.has(key)) return;
   store.set(key, value);
 });
 
@@ -291,12 +330,15 @@ ipcMain.handle('get-app-version', async () => {
 });
 
 ipcMain.handle('cleanup-partial-files', async (_event, dir) => {
-  const targetDir = dir || store.get('downloadPath');
+  const allowedBase = store.get('downloadPath');
+  const targetDir = dir || allowedBase;
+  const resolved = path.resolve(targetDir);
+  if (!resolved.startsWith(path.resolve(allowedBase))) return;
   try {
-    const files = fs.readdirSync(targetDir);
+    const files = fs.readdirSync(resolved);
     for (const file of files) {
       if (file.endsWith('.part') || file.endsWith('.ytdl')) {
-        fs.unlinkSync(path.join(targetDir, file));
+        fs.unlinkSync(path.join(resolved, file));
       }
     }
   } catch { /* ignore cleanup errors */ }
@@ -315,15 +357,23 @@ ipcMain.handle('clear-history', async () => {
   store.set('downloadHistory', []);
 });
 
+ipcMain.handle('open-external', async (_event, url) => {
+  if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+    shell.openExternal(url);
+  }
+});
+
 // --- App lifecycle ---
 
 app.on('ready', () => {
   const ytdlpOk = binaryExists(getYtdlpPath());
   if (!ytdlpOk) {
     dialog.showErrorBox(
-      'Missing Binary',
-      'yt-dlp binary is missing. Please reinstall the app or run "npm run postinstall".',
+      'Missing Binary, You Buffoon',
+      'yt-dlp binary is missing, you inept noodle. Please reinstall the app or run "npm run postinstall".',
     );
+    app.quit();
+    return;
   }
   createWindow();
 });
@@ -340,7 +390,11 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   if (activeDownloadProcess) {
-    activeDownloadProcess.kill('SIGTERM');
+    const proc = activeDownloadProcess;
     activeDownloadProcess = null;
+    proc.kill('SIGTERM');
+    setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+    }, 3000);
   }
 });

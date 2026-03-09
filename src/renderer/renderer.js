@@ -40,16 +40,9 @@ const pillIndicator = $('#pillIndicator');
 const pathDisplay = $('#pathDisplay');
 const downloadBtn = $('#downloadBtn');
 const cancelBtn = $('#cancelBtn');
-const progressWrapper = $('#progressWrapper');
-const progressFill = $('#progressFill');
-const progressPercent = $('#progressPercent');
-const progressSpeed = $('#progressSpeed');
 const statusMessage = $('#statusMessage');
 const statusIcon = $('#statusIcon');
 const statusText = $('#statusText');
-const lastDownload = $('#lastDownload');
-const lastDownloadName = $('#lastDownloadName');
-const revealBtn = $('#revealBtn');
 const dropOverlay = $('#dropOverlay');
 const settingsBtn = $('#settingsBtn');
 const settingsPopover = $('#settingsPopover');
@@ -70,6 +63,8 @@ const activityCard = $('#activityCard');
 const activityLabel = $('#activityLabel');
 const activityFill = $('#activityFill');
 const activityDetail = $('#activityDetail');
+const activityDismiss = $('#activityDismiss');
+const activityShowFile = $('#activityShowFile');
 
 /* ============================================================
    Helpers
@@ -120,6 +115,7 @@ let activityHideTimer = null;
 
 function showActivity(label, detail, mode) {
   clearTimeout(activityHideTimer);
+  activityCard.classList.remove('dismissable', 'has-file');
   activityLabel.textContent = label;
   activityDetail.textContent = detail || '';
 
@@ -142,9 +138,11 @@ function showActivity(label, detail, mode) {
 function hideActivity(delay) {
   clearTimeout(activityHideTimer);
   if (delay) {
-    activityHideTimer = setTimeout(() => activityCard.classList.remove('visible'), delay);
+    activityHideTimer = setTimeout(() => {
+      activityCard.classList.remove('visible', 'dismissable', 'has-file');
+    }, delay);
   } else {
-    activityCard.classList.remove('visible');
+    activityCard.classList.remove('visible', 'dismissable', 'has-file');
   }
 }
 
@@ -242,20 +240,12 @@ function setDownloading(active) {
   cancelBtn.style.position = active ? 'relative' : 'absolute';
   cancelBtn.style.visibility = active ? 'visible' : 'hidden';
 
-  progressWrapper.classList.toggle('visible', active);
   urlInput.disabled = active;
   startTime.disabled = active || !state.videoInfo;
   endTime.disabled = active || !state.videoInfo;
 
   if (active) {
-    showActivity('Downloading…', '0%', 0);
-  }
-
-  if (!active) {
-    progressFill.style.width = '0%';
-    progressFill.classList.remove('complete');
-    progressPercent.textContent = '0%';
-    progressSpeed.textContent = '';
+    showActivity('Ripping clip... don\'t interrupt me you nincompoop', '0%', 0);
   }
 }
 
@@ -314,18 +304,18 @@ function enforceTimeFormat(input) {
     if (!val) { input.value = '00:00:00'; return; }
 
     const nums = val.replace(/[^0-9]/g, '');
+    let h = 0, m = 0, s = 0;
     if (nums.length <= 2) {
-      input.value = `00:00:${nums.padStart(2, '0')}`;
+      s = Math.min(parseInt(nums, 10) || 0, 59);
     } else if (nums.length <= 4) {
-      const s = nums.slice(-2);
-      const m = nums.slice(0, -2).padStart(2, '0');
-      input.value = `00:${m}:${s}`;
+      s = Math.min(parseInt(nums.slice(-2), 10) || 0, 59);
+      m = Math.min(parseInt(nums.slice(0, -2), 10) || 0, 59);
     } else {
-      const s = nums.slice(-2);
-      const m = nums.slice(-4, -2);
-      const h = nums.slice(0, -4).padStart(2, '0');
-      input.value = `${h}:${m}:${s}`;
+      s = Math.min(parseInt(nums.slice(-2), 10) || 0, 59);
+      m = Math.min(parseInt(nums.slice(-4, -2), 10) || 0, 59);
+      h = parseInt(nums.slice(0, -4), 10) || 0;
     }
+    input.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     updateDownloadBtnState();
   });
 }
@@ -367,14 +357,14 @@ async function fetchInfo(url) {
   state.isFetchingInfo = true;
   hideStatus();
 
-  showActivity('Fetching video info…', '', 'indeterminate');
+    showActivity('Scanning the goddamn link...', '', 'indeterminate');
 
   videoCard.className = 'video-card visible loading';
-  videoThumb.classList.add('loaded');
-  videoTitle.textContent = 'Loading...';
+  videoThumb.classList.remove('loaded');
+  videoThumb.removeAttribute('src');
+  videoTitle.textContent = 'Loading... you party pooper';
   videoMeta.textContent = '';
   videoQualities.textContent = '';
-  videoThumb.src = '';
   updateDownloadBtnState();
 
   try {
@@ -395,7 +385,7 @@ async function fetchInfo(url) {
     endTime.disabled = false;
     updateDownloadBtnState();
 
-    showActivity('Ready to download', info.title, 'complete');
+    showActivity('Locked in. Ready to rip, you joy killer.', info.title, 'complete');
     hideActivity(3000);
   } catch (err) {
     videoCard.className = 'video-card';
@@ -403,7 +393,7 @@ async function fetchInfo(url) {
     showStatus('error', err.message || 'Failed to fetch video info.');
     updateDownloadBtnState();
 
-    showActivity('Failed', err.message || 'Error fetching info', 0);
+    showActivity('Failed, you bungling fool', err.message || 'Error fetching info', 0);
     hideActivity(4000);
   } finally {
     state.isFetchingInfo = false;
@@ -442,9 +432,9 @@ async function handleDownload() {
       title: state.videoInfo.title,
     });
   } catch (err) {
-    showStatus('error', err.message || 'Download failed.');
+    showStatus('error', err.message || 'Download crashed and burned, you buffoon. Try again.');
     setDownloading(false);
-    showActivity('Download failed', err.message || '', 0);
+    showActivity('Download failed, you inept noodle', err.message || '', 0);
     hideActivity(4000);
   }
 }
@@ -453,8 +443,8 @@ async function handleCancel() {
   try {
     await window.api.cancelDownload();
     setDownloading(false);
-    showStatus('warning', 'Download cancelled.');
-    showActivity('Cancelled', '', 0);
+    showStatus('warning', 'Download cancelled. You ruined everything, you clown.');
+    showActivity('Cancelled, you impatient numbskull', '', 0);
     hideActivity(3000);
     await window.api.cleanupPartialFiles(state.downloadPath);
   } catch { /* ignore */ }
@@ -465,32 +455,17 @@ async function handleCancel() {
    ============================================================ */
 
 window.api.onDownloadProgress((data) => {
-  progressFill.style.width = `${data.percent}%`;
-  progressPercent.textContent = `${Math.round(data.percent)}%`;
-  progressSpeed.textContent = data.speed || '';
-
-  showActivity('Downloading…', `${Math.round(data.percent)}%${data.speed ? ' · ' + data.speed : ''}`, data.percent);
+  showActivity('Ripping clip... don\'t interrupt me you nincompoop', `${Math.round(data.percent)}%${data.speed ? ' · ' + data.speed : ''}`, data.percent);
 });
 
 window.api.onDownloadComplete((data) => {
   setDownloading(false);
-  progressFill.style.width = '100%';
-  progressFill.classList.add('complete');
-  progressPercent.textContent = '100%';
-  progressWrapper.classList.add('visible');
-
   state.lastDownloadedFile = data.filePath;
   const fileName = data.filePath ? data.filePath.split('/').pop() : 'Download complete';
-  lastDownloadName.textContent = fileName;
-  lastDownload.classList.add('visible');
 
-  showStatus('success', 'Download complete!');
-  showActivity('Complete', fileName, 'complete');
-  hideActivity(5000);
-
-  setTimeout(() => {
-    progressWrapper.classList.remove('visible');
-  }, 3000);
+  showStatus('success', 'Clip secured, somehow you didn\'t fuck it up!');
+  showActivity('Complete, you lucky buffoon', fileName, 'complete');
+  activityCard.classList.add('dismissable', 'has-file');
 });
 
 window.api.onDownloadError((data) => {
@@ -512,7 +487,7 @@ window.api.onWindowFocus(async () => {
     if (text && isValidYouTubeURL(text) && text !== state.lastClipboardUrl && text !== urlInput.value.trim()) {
       state.lastClipboardUrl = text;
       urlInput.value = text;
-      urlHint.textContent = 'Pasted from clipboard';
+      urlHint.textContent = 'Clipboard loot detected, you sneaky rat';
       urlHint.classList.add('clipboard');
       handleUrlChange();
 
@@ -584,7 +559,6 @@ qualitySelector.addEventListener('click', (e) => {
    ============================================================ */
 
 urlInput.addEventListener('input', handleUrlChange);
-urlInput.addEventListener('paste', () => setTimeout(handleUrlChange, 50));
 
 urlClear.addEventListener('click', () => {
   urlInput.value = '';
@@ -608,11 +582,15 @@ pathDisplay.addEventListener('click', async () => {
   }
 });
 
-revealBtn.addEventListener('click', async () => {
+activityDismiss.addEventListener('click', () => {
+  hideActivity();
+});
+
+activityShowFile.addEventListener('click', async () => {
   if (!state.lastDownloadedFile) return;
   const result = await window.api.revealInFinder(state.lastDownloadedFile);
   if (!result.found) {
-    showStatus('warning', 'File was moved or deleted. Opened download folder instead.');
+    showStatus('warning', 'File vanished, you probably deleted it yourself. Opened the folder instead.');
   }
 });
 
@@ -639,15 +617,15 @@ updateYtdlpBtn.addEventListener('click', async (e) => {
   try {
     const result = await window.api.updateYtdlp();
     if (result.success) {
-      showStatus('success', `yt-dlp updated to ${result.version}`);
+      showStatus('success', `yt-dlp fucking updated to ${result.version}`);
     } else {
-      showStatus('error', `Update failed: ${result.error}`);
+      showStatus('error', `Update failed: ${result.error} - what did you expect, you dim bulb?`);
     }
   } catch (err) {
-    showStatus('error', 'Failed to update yt-dlp.');
+    showStatus('error', 'Failed to update yt-dlp, you clumsy oaf.');
   } finally {
     updateYtdlpBtn.disabled = false;
-    updateYtdlpBtn.textContent = 'Update yt-dlp';
+    updateYtdlpBtn.textContent = 'Update';
     updateYtdlpBtn.classList.remove('updating');
   }
 });
@@ -747,7 +725,7 @@ function getFilteredHistory() {
     entries = entries.filter(e => {
       const searchable = [
         e.title, e.uploader, e.channel,
-        e.webpageUrl, e.description,
+        e.webpageUrl, e.description, e.videoId,
         ...(e.tags || []), ...(e.categories || []),
       ].join(' ').toLowerCase();
       return searchable.includes(term);
@@ -847,8 +825,8 @@ function createHistoryEntryEl(entry) {
         <div class="history-entry__title">${escapeHtml(entry.title)}</div>
         <div class="history-entry__meta">${escapeHtml(metaParts.join(' · '))}</div>
       </div>
-      <span class="history-entry__quality">${qualityLabel(entry.quality)}</span>
-      <span class="history-entry__date">${formatRelativeDate(entry.downloadedAt)}</span>
+      <span class="history-entry__quality">${escapeHtml(qualityLabel(entry.quality))}</span>
+      <span class="history-entry__date">${escapeHtml(formatRelativeDate(entry.downloadedAt))}</span>
       <span class="history-entry__chevron">
         <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
           <path d="M7.5 5l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -859,7 +837,9 @@ function createHistoryEntryEl(entry) {
       <div class="history-entry__detail-divider"></div>
       <dl class="history-detail-grid">${dlHtml}</dl>
       <div class="history-entry__actions">
+        <button class="history-action-btn history-action-btn--copyinfo" data-action="copyinfo">Copy Info</button>
         <button class="history-action-btn history-action-btn--copy" data-action="copy">Copy URL</button>
+        <button class="history-action-btn history-action-btn--open" data-action="open">Open</button>
         <button class="history-action-btn history-action-btn--delete" data-action="delete">Remove</button>
       </div>
     </div>
@@ -884,14 +864,51 @@ function createHistoryEntryEl(entry) {
     });
   }
 
-  el.querySelector('[data-action="copy"]').addEventListener('click', (e) => {
+  el.querySelector('[data-action="copyinfo"]').addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (entry.webpageUrl) {
-      navigator.clipboard.writeText(entry.webpageUrl);
+    const lines = [];
+    lines.push(`Title: ${entry.title}`);
+    if (entry.channel || entry.uploader) lines.push(`Channel: ${entry.channel || entry.uploader}`);
+    if (entry.channelUrl) lines.push(`Channel URL: ${entry.channelUrl}`);
+    if (entry.webpageUrl) lines.push(`Source: ${entry.webpageUrl}`);
+    if (entry.uploadDate) lines.push(`Upload Date: ${formatUploadDate(entry.uploadDate)}`);
+    lines.push(`Duration: ${formatDuration(entry.duration)}`);
+    if ((entry.clipStart && entry.clipStart !== '00:00:00') || (entry.clipEnd && entry.clipEnd !== '00:00:00')) {
+      lines.push(`Clip: ${entry.clipStart || '00:00:00'} – ${entry.clipEnd || 'end'}`);
+    }
+    lines.push(`Quality: ${qualityLabel(entry.quality)} · ${(entry.format || '').toUpperCase()}`);
+    if (entry.viewCount != null) lines.push(`Views: ${formatNumber(entry.viewCount)}`);
+    if (entry.likeCount != null) lines.push(`Likes: ${formatNumber(entry.likeCount)}`);
+    if (entry.categories && entry.categories.length) lines.push(`Categories: ${entry.categories.join(', ')}`);
+    if (entry.tags && entry.tags.length) lines.push(`Tags: ${entry.tags.join(', ')}`);
+    if (entry.license) lines.push(`License: ${entry.license}`);
+    if (entry.filePath) lines.push(`File: ${entry.filePath}`);
+    if (entry.fileSize) lines.push(`Size: ${formatFileSize(entry.fileSize)}`);
+    lines.push(`Downloaded: ${formatFullDate(entry.downloadedAt)}`);
+
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
       const btn = e.currentTarget;
       btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = 'Copy URL'; }, 1500);
+      setTimeout(() => { btn.textContent = 'Copy Info'; }, 1500);
+    } catch { /* clipboard access denied */ }
+  });
+
+  el.querySelector('[data-action="copy"]').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (entry.webpageUrl) {
+      try {
+        await navigator.clipboard.writeText(entry.webpageUrl);
+        const btn = e.currentTarget;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy URL'; }, 1500);
+      } catch { /* clipboard access denied */ }
     }
+  });
+
+  el.querySelector('[data-action="open"]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (entry.webpageUrl) window.api.openExternal(entry.webpageUrl);
   });
 
   el.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
@@ -928,11 +945,45 @@ historyBack.addEventListener('click', () => {
   closeHistory();
 });
 
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.historyOpen) {
+    closeHistory();
+  }
+});
+
 historyClearBtn.addEventListener('click', async () => {
   if (state.historyData.length === 0) return;
-  await window.api.clearHistory();
-  state.historyData = [];
-  renderHistoryList();
+  if (historyClearBtn.classList.contains('confirm')) return;
+  const count = state.historyData.length;
+  historyClearBtn.textContent = `Nuke these ${count} worthless entries?`;
+  historyClearBtn.classList.add('confirm');
+
+  const onConfirm = async () => {
+    historyClearBtn.removeEventListener('click', onConfirm);
+    await window.api.clearHistory();
+    state.historyData = [];
+    renderHistoryList();
+    historyClearBtn.textContent = 'Clear All, You Coward';
+    historyClearBtn.classList.remove('confirm');
+  };
+
+  const onCancel = () => {
+    historyClearBtn.textContent = 'Clear All, You Coward';
+    historyClearBtn.classList.remove('confirm');
+    historyClearBtn.removeEventListener('click', onConfirm);
+    document.removeEventListener('click', onOutside);
+  };
+
+  const onOutside = (e) => {
+    if (!historyClearBtn.contains(e.target)) {
+      onCancel();
+    }
+  };
+
+  setTimeout(() => {
+    historyClearBtn.addEventListener('click', onConfirm, { once: true });
+    document.addEventListener('click', onOutside, { once: true });
+  }, 10);
 });
 
 historySortBtn.addEventListener('click', () => {
@@ -985,7 +1036,7 @@ async function init() {
   try {
     const update = await window.api.checkAppUpdate();
     if (update.available) {
-      showStatus('info', `New version v${update.version} available! Open Settings to update.`);
+      showStatus('info', `New version v${update.version} available, you slow cooker! Open Settings to update.`);
     }
   } catch { /* no update check errors shown */ }
 }

@@ -188,6 +188,7 @@ function startDownload(options, onProgress, onComplete, onError) {
   const args = buildDownloadArgs({ ...options, ffmpegDir });
   const proc = spawn(ytdlp, args);
 
+  const MAX_STDERR = 10 * 1024;
   let stderrBuf = '';
   const parseState = { lastFile: '' };
 
@@ -200,6 +201,9 @@ function startDownload(options, onProgress, onComplete, onError) {
   proc.stderr.on('data', (data) => {
     const text = data.toString();
     stderrBuf += text;
+    if (stderrBuf.length > MAX_STDERR) {
+      stderrBuf = stderrBuf.slice(-MAX_STDERR);
+    }
     text.split('\n').forEach(parseLine);
   });
 

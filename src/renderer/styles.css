@@ -167,6 +167,64 @@ input, button {
   min-height: 12px;
 }
 
+.activity-dismiss {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  color: var(--grey-muted);
+  font-size: 10px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: background 200ms var(--ease), color 200ms var(--ease);
+}
+
+.activity-dismiss:hover {
+  background: rgba(255,255,255,0.15);
+  color: var(--white);
+}
+
+.activity-card.dismissable {
+  padding-right: 36px;
+}
+
+.activity-card.dismissable .activity-dismiss {
+  display: flex;
+}
+
+.activity-show-file {
+  display: none;
+  height: 26px;
+  padding: 0 14px;
+  margin-top: 6px;
+  background: var(--red-bright);
+  color: var(--white);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: transform 200ms var(--spring);
+}
+
+.activity-show-file:hover {
+  transform: scale(1.03);
+}
+
+.activity-show-file:active {
+  transform: scale(0.97);
+}
+
+.activity-card.has-file .activity-show-file {
+  display: inline-flex;
+}
+
 /* ============================================================
    Logo — Fixed bottom-right
    ============================================================ */
@@ -280,14 +338,16 @@ input, button {
 .btn-download {
   height: 40px;
   padding: 0 28px;
-  margin: 6px;
-  margin-left: 0;
+  margin: 6px 6px 6px 0;
   background: var(--red-bright);
   color: var(--red-dark);
   border-radius: var(--radius-pill);
   font-size: 14px;
   cursor: pointer;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition:
     transform 250ms var(--spring),
     opacity 200ms var(--ease);
@@ -309,8 +369,7 @@ input, button {
 .btn-cancel {
   height: 40px;
   padding: 0 28px;
-  margin: 6px;
-  margin-left: 0;
+  margin: 6px 6px 6px 0;
   background: transparent;
   color: var(--red-bright);
   border: 2px solid var(--red-bright);
@@ -318,6 +377,9 @@ input, button {
   font-size: 14px;
   cursor: pointer;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition:
     transform 250ms var(--spring),
     opacity 200ms var(--ease);
@@ -487,13 +549,21 @@ input, button {
   animation: slideDown 350ms var(--ease);
 }
 
-.video-card__thumb {
+.video-card__thumb-wrap {
   width: 80px;
   height: 45px;
   border-radius: 8px;
-  object-fit: cover;
   background: rgba(226,0,0,0.06);
   flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.video-card__thumb {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  object-fit: cover;
   opacity: 0;
   transition: opacity 300ms var(--ease);
 }
@@ -531,7 +601,7 @@ input, button {
 }
 
 /* Skeleton */
-.video-card.loading .video-card__thumb,
+.video-card.loading .video-card__thumb-wrap,
 .video-card.loading .video-card__title,
 .video-card.loading .video-card__meta {
   background: rgba(226,0,0,0.08);
@@ -712,62 +782,6 @@ input, button {
 }
 
 /* ============================================================
-   Progress
-   ============================================================ */
-
-.progress-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  opacity: 0;
-  max-height: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transition:
-    opacity 300ms var(--ease),
-    max-height 300ms var(--ease),
-    margin 300ms var(--ease);
-}
-
-.progress-wrapper.visible {
-  opacity: 1;
-  max-height: 32px;
-  margin-bottom: var(--gap);
-  pointer-events: auto;
-}
-
-.progress-bar {
-  flex: 1;
-  height: 4px;
-  background: var(--red-dark);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.progress-bar__fill {
-  height: 100%;
-  width: 0%;
-  background: var(--red-bright);
-  border-radius: 999px;
-  transition: width 300ms var(--ease);
-}
-
-.progress-bar__fill.complete {
-  background: var(--color-success);
-}
-
-.progress-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--grey-muted);
-  white-space: nowrap;
-  min-width: 60px;
-}
-
-/* ============================================================
    Status Messages
    ============================================================ */
 
@@ -815,63 +829,6 @@ input, button {
 
 .status-message__icon { flex-shrink: 0; }
 .status-message__text { flex: 1; }
-
-/* ============================================================
-   Last Download
-   ============================================================ */
-
-.last-download {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 8px 14px;
-  background: var(--red-dark);
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transition:
-    opacity 250ms var(--ease),
-    transform 250ms var(--ease),
-    max-height 250ms var(--ease),
-    padding 250ms var(--ease);
-  transform: translateY(-4px);
-}
-
-.last-download.visible {
-  opacity: 1;
-  transform: translateY(0);
-  max-height: 50px;
-  padding: 8px 14px;
-  pointer-events: auto;
-}
-
-.last-download__name {
-  color: var(--grey-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  margin-right: 10px;
-}
-
-.btn-reveal {
-  color: var(--red-bright);
-  font-size: 11px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: transform 200ms var(--spring);
-}
-
-.btn-reveal:hover {
-  transform: scale(1.05);
-}
 
 /* ============================================================
    Drop Overlay
@@ -1352,6 +1309,42 @@ input, button {
 .history-action-btn--delete:hover {
   color: var(--color-error);
   border-color: rgba(255,69,58,0.3);
+}
+
+.history-action-btn--copyinfo {
+  background: var(--red-bright);
+  color: var(--white);
+}
+
+.history-action-btn--open {
+  background: transparent;
+  color: var(--grey-muted);
+  border: 1.5px solid rgba(255,255,255,0.08);
+}
+
+/* ---- Clickable file path in detail grid ---- */
+
+.history-detail-grid .file-link {
+  color: var(--red-bright);
+  cursor: pointer;
+  transition: opacity 200ms var(--ease);
+}
+
+.history-detail-grid .file-link:hover {
+  opacity: 0.75;
+}
+
+.history-detail-grid .file-link.missing {
+  color: var(--grey-muted);
+  text-decoration: line-through;
+  cursor: default;
+}
+
+/* ---- Clear All confirm state ---- */
+
+.history-clear-btn.confirm {
+  color: var(--color-error);
+  background: rgba(255,69,58,0.15);
 }
 
 /* ---- Empty state ---- */

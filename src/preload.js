@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   getHistory: () => ipcRenderer.invoke('get-history'),
   deleteHistoryEntry: (id) => ipcRenderer.invoke('delete-history-entry', id),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
   onDownloadProgress: (callback) => {
     const listener = (_event, data) => callback(data);

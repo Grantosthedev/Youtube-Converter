@@ -20,11 +20,15 @@ function normalizeYouTubeURL(url) {
 }
 
 function sanitizeFilename(name) {
-  return name
+  let safe = name
+    .replace(/[\x00-\x1f\x7f]/g, '')
     .replace(/[/\\:*?"<>|]/g, '-')
     .replace(/\s+/g, ' ')
+    .replace(/^\.+/, '')
+    .replace(/[.\s]+$/, '')
     .trim()
     .substring(0, 200);
+  return safe || 'download';
 }
 
 function getResourcePath(...segments) {
