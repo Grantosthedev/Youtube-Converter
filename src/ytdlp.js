@@ -4,13 +4,16 @@ const path = require('path');
 
 const ERROR_MAP = [
   { pattern: /private video/i, message: 'This video is private. You need access to download it.' },
-  { pattern: /age/i, message: 'This video is age-restricted. It cannot be downloaded without authentication.' },
+  { pattern: /age.?restrict|age.?gate|sign in to confirm your age/i, message: 'This video is age-restricted. It cannot be downloaded without authentication.' },
   { pattern: /not available in your country/i, message: 'This video is not available in your region.' },
-  { pattern: /HTTP Error 429/i, message: 'YouTube is rate-limiting requests. Wait a minute and try again.' },
-  { pattern: /HTTP Error 403|Forbidden/i, message: 'YouTube is rate-limiting requests. Wait a minute and try again.' },
+  { pattern: /login.*page|locked behind/i, message: 'This content requires login. Try updating yt-dlp, or the content may be private.' },
+  { pattern: /Unsupported URL/i, message: 'This URL type isn\'t supported yet. DL Buddy handles videos and audio -- image-only posts aren\'t supported via this method.' },
+  { pattern: /unable to extract/i, message: 'Couldn\'t extract content. The post may be private, deleted, or require login.' },
+  { pattern: /HTTP Error 429/i, message: 'Rate-limiting detected. Wait a minute and try again.' },
+  { pattern: /HTTP Error 403|Forbidden/i, message: 'Access denied. The platform is rate-limiting requests. Wait a moment and try again.' },
   { pattern: /urlopen error|timed out|network/i, message: 'Network error. Check your internet connection and try again.' },
   { pattern: /video.*(?:unavailable|removed|deleted|not exist)/i, message: 'This video is unavailable or has been removed.' },
-  { pattern: /is not a valid URL|no video/i, message: 'Please enter a valid YouTube URL.' },
+  { pattern: /is not a valid URL|no video/i, message: 'Please enter a valid URL.' },
 ];
 
 function mapError(stderr) {
@@ -22,7 +25,7 @@ function mapError(stderr) {
   return 'An unexpected error occurred. Please try again.';
 }
 
-function fetchVideoInfo(url) {
+function fetchVideoInfo(url, platform) {
   return new Promise((resolve, reject) => {
     const ytdlp = getYtdlpPath();
     const ffmpeg = getFfmpegPath();
@@ -35,7 +38,8 @@ function fetchVideoInfo(url) {
       url,
     ];
 
-    const proc = spawn(ytdlp, args, { timeout: 30000 });
+    const timeout = platform === 'instagram' ? 60000 : platform === 'tiktok' ? 45000 : 30000;
+    const proc = spawn(ytdlp, args, { timeout });
     let stdout = '';
     let stderr = '';
 
@@ -49,14 +53,24 @@ function fetchVideoInfo(url) {
       }
       try {
         const info = JSON.parse(stdout);
+        const formats = info.formats || [];
+        let estimatedFileSize = 0;
+        for (let i = formats.length - 1; i >= 0; i--) {
+          const f = formats[i];
+          if (f.filesize || f.filesize_approx) {
+            estimatedFileSize = f.filesize || f.filesize_approx;
+            break;
+          }
+        }
+
         resolve({
           id: info.id,
           title: info.title || 'Unknown Title',
           duration: info.duration || 0,
           thumbnail: info.thumbnail || info.thumbnails?.[info.thumbnails.length - 1]?.url || '',
           isLive: info.is_live || false,
-          formats: extractAvailableQualities(info.formats || []),
-          uploader: info.uploader || '',
+          formats: extractAvailableQualities(formats),
+          uploader: info.creator || info.uploader || info.channel || '',
           uploadDate: info.upload_date || '',
           description: (info.description || '').slice(0, 300),
           viewCount: info.view_count ?? null,
@@ -67,6 +81,9 @@ function fetchVideoInfo(url) {
           categories: info.categories || [],
           tags: (info.tags || []).slice(0, 10),
           license: info.license || '',
+          platform: platform || 'youtube',
+          mediaType: (info.duration === 0 || info.duration === null) && platform !== 'youtube' ? 'image' : 'video',
+          estimatedFileSize,
         });
       } catch (e) {
         reject(new Error('Failed to parse video information.'));
@@ -95,8 +112,9 @@ function extractAvailableQualities(formats) {
   });
 }
 
-function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title, ffmpegDir }) {
+function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title, ffmpegDir, platform }) {
   const safeName = sanitizeFilename(title);
+  const isYouTube = !platform || platform === 'youtube';
   const args = [
     '--no-warnings',
     '--no-playlist',
@@ -109,36 +127,54 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
   ];
 
   if (quality === 'audio') {
-    args.push('-f', 'bestaudio');
-    args.push('-x', '--audio-format', 'm4a');
+    args.push('-f', 'bestaudio[ext=m4a]/bestaudio');
+    args.push('-x', '--audio-format', 'm4a', '--audio-quality', '0');
     args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
-  } else if (quality === 'hd') {
-    args.push(
-      '-f',
-      'bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080]+bestaudio',
-      '--merge-output-format', 'mp4',
-    );
+  } else if (isYouTube) {
+    if (quality === 'hd') {
+      args.push(
+        '-f',
+        'bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080]+bestaudio',
+        '--merge-output-format', 'mp4',
+      );
+    } else {
+      args.push(
+        '-f',
+        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo+bestaudio',
+        '--merge-output-format', 'mp4',
+      );
+    }
     args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
   } else {
-    args.push(
-      '-f',
-      'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo+bestaudio',
-      '--merge-output-format', 'mp4',
-    );
+    if (quality === 'hd') {
+      args.push(
+        '-f',
+        'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+        '--merge-output-format', 'mp4',
+      );
+    } else {
+      args.push(
+        '-f',
+        'bestvideo+bestaudio/best',
+        '--merge-output-format', 'mp4',
+      );
+    }
     args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
   }
 
-  const hasStart = startTime && startTime !== '00:00:00';
-  const hasEnd = endTime && endTime !== '00:00:00';
-  if (hasStart || hasEnd) {
-    const start = startTime || '00:00:00';
-    const end = endTime || '';
-    if (end) {
-      args.push('--download-sections', `*${start}-${end}`);
-    } else {
-      args.push('--download-sections', `*${start}-inf`);
+  if (isYouTube) {
+    const hasStart = startTime && startTime !== '00:00:00';
+    const hasEnd = endTime && endTime !== '00:00:00';
+    if (hasStart || hasEnd) {
+      const start = startTime || '00:00:00';
+      const end = endTime || '';
+      if (end) {
+        args.push('--download-sections', `*${start}-${end}`);
+      } else {
+        args.push('--download-sections', `*${start}-inf`);
+      }
+      args.push('--force-keyframes-at-cuts');
     }
-    args.push('--force-keyframes-at-cuts');
   }
 
   args.push(url);
@@ -222,4 +258,60 @@ function startDownload(options, onProgress, onComplete, onError) {
   return proc;
 }
 
-module.exports = { fetchVideoInfo, startDownload };
+function fetchCarouselVideos(url) {
+  return new Promise((resolve) => {
+    const ytdlp = getYtdlpPath();
+    const ffmpeg = getFfmpegPath();
+
+    const args = [
+      '--dump-json',
+      '--no-warnings',
+      '--ffmpeg-location', path.dirname(ffmpeg),
+      url,
+    ];
+
+    const proc = spawn(ytdlp, args, { timeout: 60000 });
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        resolve([]);
+        return;
+      }
+      try {
+        const items = [];
+        const lines = stdout.trim().split('\n');
+
+        for (const line of lines) {
+          try {
+            const info = JSON.parse(line);
+            const videoUrl = info.url || '';
+            const thumbnail = info.thumbnail || info.thumbnails?.[info.thumbnails.length - 1]?.url || '';
+
+            if (videoUrl && info.duration > 0) {
+              items.push({
+                type: 'video',
+                url: videoUrl,
+                thumbnail,
+                width: info.width || 0,
+                height: info.height || 0,
+              });
+            }
+          } catch { /* skip unparseable lines */ }
+        }
+
+        resolve(items);
+      } catch {
+        resolve([]);
+      }
+    });
+
+    proc.on('error', () => resolve([]));
+  });
+}
+
+module.exports = { fetchVideoInfo, startDownload, fetchCarouselVideos };

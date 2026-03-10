@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 const path = require('path');
@@ -12,6 +13,27 @@ module.exports = {
     extraResource: [
       path.join(__dirname, 'bin'),
     ],
+    ignore: [
+      /^\/bin($|\/)/,
+      /^\/assets($|\/)/,
+      /^\/scripts($|\/)/,
+      /^\/out($|\/)/,
+      /^\/\.git/,
+      /^\/\.env$/,
+      /^\/\.gitignore$/,
+      /^\/README\.md$/i,
+      /^\/forge\.config\.js$/,
+      /\.d\.ts$/,
+      /\.js\.map$/,
+      /\/CHANGELOG(\.md)?$/i,
+    ],
+    osxSign: {
+      identity: 'Apple Distribution'
+    },
+    osxNotarize: {
+      appleId: process.env.APPLE_ID,
+      appleIdPassword: process.env.APPLE_ID_PASSWORD
+    }
   },
   rebuildConfig: {},
   makers: [

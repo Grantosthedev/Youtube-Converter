@@ -3,7 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   fetchVideoInfo: (url) => ipcRenderer.invoke('fetch-video-info', url),
   startDownload: (options) => ipcRenderer.invoke('start-download', options),
-  cancelDownload: () => ipcRenderer.invoke('cancel-download'),
+  fetchMediaInfo: (url) => ipcRenderer.invoke('fetch-media-info', url),
+  fetchCarouselVideos: (url) => ipcRenderer.invoke('fetch-carousel-videos', url),
+  downloadImage: (options) => ipcRenderer.invoke('download-image', options),
+  cancelDownload: (id) => ipcRenderer.invoke('cancel-download', id),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   revealInFinder: (filePath) => ipcRenderer.invoke('reveal-in-finder', filePath),
   getSettings: () => ipcRenderer.invoke('get-settings'),
@@ -33,6 +36,11 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('download-error', listener);
     return () => ipcRenderer.removeListener('download-error', listener);
+  },
+  onDownloadCancelled: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('download-cancelled', listener);
+    return () => ipcRenderer.removeListener('download-cancelled', listener);
   },
   onWindowFocus: (callback) => {
     const listener = () => callback();

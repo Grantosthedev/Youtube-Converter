@@ -3,15 +3,17 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const Store = require('electron-store');
-const { fetchVideoInfo, startDownload } = require('./ytdlp');
+const { fetchVideoInfo, startDownload, fetchCarouselVideos } = require('./ytdlp');
 const { updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate } = require('./updater');
-const { isValidYouTubeURL, normalizeYouTubeURL, binaryExists, getYtdlpPath, getFfmpegPath, pathExists, checkDiskSpace } = require('./utils');
+const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getFfmpegPath, pathExists, checkDiskSpace } = require('./utils');
+const { fetchMediaInfo, downloadImage } = require('./media-fetcher');
 
 const store = new Store({
   defaults: {
     downloadPath: path.join(app.getPath('downloads'), 'YT Clips'),
     quality: 'best',
     autoPaste: true,
+    showInFinder: false,
     windowBounds: { width: 880, height: 640 },
     downloadHistory: [],
   },
@@ -20,8 +22,7 @@ const store = new Store({
 const videoInfoCache = new Map();
 
 let mainWindow = null;
-let activeDownloadProcess = null;
-let downloadCancelled = false;
+const activeDownloads = new Map();
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -58,6 +59,15 @@ function createWindow() {
     },
   });
 
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ['https://*.cdninstagram.com/*', 'https://*.fbcdn.net/*'] },
+    (details, callback) => {
+      details.requestHeaders['Referer'] = 'https://www.instagram.com/';
+      details.requestHeaders['Origin'] = 'https://www.instagram.com';
+      callback({ requestHeaders: details.requestHeaders });
+    },
+  );
+
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
@@ -75,6 +85,23 @@ function createWindow() {
     } catch { /* ignore persist errors */ }
   });
 
+  mainWindow.on('close', (e) => {
+    if (activeDownloads.size > 0) {
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'warning',
+        buttons: ['Cancel', 'Quit Anyway'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Active Downloads, Fam',
+        message: `You got ${activeDownloads.size} download${activeDownloads.size > 1 ? 's' : ''} running. Quit anyway? smh`,
+      });
+      if (choice === 0) {
+        e.preventDefault();
+        return;
+      }
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -83,19 +110,23 @@ function createWindow() {
 // --- IPC Handlers ---
 
 ipcMain.handle('fetch-video-info', async (_event, url) => {
-  if (!isValidYouTubeURL(url)) {
-    throw new Error('YOU ABSOLUTE BUFFOON, that\'s not a YouTube URL. Paste a real fucking link before I scream.');
+  if (!isValidURL(url)) {
+    throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
-  const normalized = normalizeYouTubeURL(url);
-  const info = await fetchVideoInfo(normalized);
-  if (info.isLive) {
-    throw new Error('Live streams can\'t be clipped, you impatient nincompoop. Wait for the stream to end like everyone else.');
+  const platform = detectPlatform(url);
+  const cacheKey = platform === 'youtube' ? normalizeYouTubeURL(url) : url.trim();
+  const fetchUrl = platform === 'youtube' ? normalizeYouTubeURL(url) : url.trim();
+
+  const info = await fetchVideoInfo(fetchUrl, platform);
+
+  if (platform === 'youtube' && info.isLive) {
+    throw new Error('Live streams can\'t be clipped, bitch. Wait for the stream to end like everyone else.');
   }
   if (videoInfoCache.size > 50) {
     const oldest = videoInfoCache.keys().next().value;
     videoInfoCache.delete(oldest);
   }
-  videoInfoCache.set(normalized, info);
+  videoInfoCache.set(cacheKey, info);
   return info;
 });
 
@@ -106,8 +137,8 @@ ipcMain.handle('start-download', async (event, options) => {
   if (!options || typeof options !== 'object') {
     throw new Error('Invalid download options, you inept noodle.');
   }
-  if (!isValidYouTubeURL(options.url)) {
-    throw new Error('YOU ABSOLUTE BUFFOON, that\'s not a YouTube URL. Paste a real fucking link before I scream.');
+  if (!isValidURL(options.url)) {
+    throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
   if (options.quality && !VALID_QUALITIES.has(options.quality)) {
     throw new Error('Invalid quality setting, you thick as a brick.');
@@ -119,6 +150,7 @@ ipcMain.handle('start-download', async (event, options) => {
     throw new Error('Invalid end time format, you clown.');
   }
 
+  const platform = detectPlatform(options.url);
   const downloadPath = options.outputPath || store.get('downloadPath');
 
   if (!pathExists(downloadPath)) {
@@ -131,7 +163,7 @@ ipcMain.handle('start-download', async (event, options) => {
 
   const freeSpace = await checkDiskSpace(downloadPath);
   if (freeSpace < 100 * 1024 * 1024) {
-    throw new Error('Disk space is fucking cooked, you fun vampire. Free some space or switch drives.');
+    throw new Error('Disk space is fucking cooked. Free some space or switch drives.');
   }
 
   try {
@@ -140,28 +172,34 @@ ipcMain.handle('start-download', async (event, options) => {
     throw new Error('Cannot save to this folder, you clumsy oaf. Pick another goddamn folder.');
   }
 
+  const downloadId = crypto.randomUUID();
+  const downloadUrl = platform === 'youtube' ? normalizeYouTubeURL(options.url) : options.url.trim();
+
   const downloadOptions = {
-    url: normalizeYouTubeURL(options.url),
+    url: downloadUrl,
     quality: options.quality || 'best',
     startTime: options.startTime,
     endTime: options.endTime,
     outputPath: downloadPath,
     title: options.title || 'download',
+    platform,
   };
 
-  downloadCancelled = false;
+  const proc = startDownload(
+    downloadOptions,
+    (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('download-progress', { id: downloadId, ...progress });
+      }
+    },
+    (filePath) => {
+      activeDownloads.delete(downloadId);
 
-  return new Promise((resolve, reject) => {
-    activeDownloadProcess = startDownload(
-      downloadOptions,
-      (progress) => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('download-progress', progress);
-        }
-      },
-      (filePath) => {
-        activeDownloadProcess = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('download-complete', { id: downloadId, filePath });
+      }
 
+      try {
         const cachedInfo = videoInfoCache.get(downloadOptions.url) || {};
         let fileSize = 0;
         try { fileSize = fs.statSync(filePath).size; } catch { /* ignore */ }
@@ -190,6 +228,8 @@ ipcMain.handle('start-download', async (event, options) => {
           fileSize,
           format: ext || (downloadOptions.quality === 'audio' ? 'm4a' : 'mp4'),
           downloadedAt: new Date().toISOString(),
+          platform: cachedInfo.platform || platform || 'youtube',
+          mediaType: cachedInfo.mediaType || 'video',
         };
 
         const history = store.get('downloadHistory');
@@ -197,14 +237,10 @@ ipcMain.handle('start-download', async (event, options) => {
         if (history.length > 500) history.length = 500;
         store.set('downloadHistory', history);
 
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('download-complete', { filePath });
-        }
-
         if (Notification.isSupported()) {
           const notif = new Notification({
-            title: 'Download Complete, You Lucky Buffoon',
-            body: cachedInfo.title || path.basename(filePath || 'Video downloaded somehow'),
+            title: 'Done, You Lucky Mother Fucka!',
+            body: cachedInfo.title || path.basename(filePath || 'Video saved somehow, lol'),
             silent: false,
             actions: [{ type: 'button', text: 'Show File' }],
           });
@@ -217,56 +253,161 @@ ipcMain.handle('start-download', async (event, options) => {
           notif.show();
         }
 
-        resolve({ filePath });
-      },
-      (errorMsg) => {
-        activeDownloadProcess = null;
-
-        if (downloadCancelled) {
-          downloadCancelled = false;
-          resolve({ cancelled: true });
-          return;
+        if (store.get('showInFinder') && filePath) {
+          shell.showItemInFolder(filePath);
         }
+      } catch { /* history/notification must never block the completion event */ }
+    },
+    (errorMsg) => {
+      const entry = activeDownloads.get(downloadId);
+      const wasCancelled = entry?.cancelled;
+      activeDownloads.delete(downloadId);
+
+      if (wasCancelled) {
+        try {
+          const files = fs.readdirSync(downloadPath);
+          for (const file of files) {
+            if (file.endsWith('.part') || file.endsWith('.ytdl')) {
+              fs.unlinkSync(path.join(downloadPath, file));
+            }
+          }
+        } catch { /* ignore cleanup errors */ }
 
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('download-error', { error: errorMsg });
+          mainWindow.webContents.send('download-cancelled', { id: downloadId });
         }
+        return;
+      }
 
-        if (Notification.isSupported()) {
-          const notif = new Notification({
-            title: 'Download Failed, You Bungling Fool',
-            body: errorMsg || 'Something went wrong, you numbskull.',
-            silent: false,
-          });
-          notif.on('click', () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.show();
-              mainWindow.focus();
-            }
-          });
-          notif.show();
-        }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('download-error', { id: downloadId, error: errorMsg });
+      }
 
-        reject(new Error(errorMsg));
-      },
-    );
-  });
+      if (Notification.isSupported()) {
+        const notif = new Notification({
+          title: 'What the Helly! Download Failed',
+          body: errorMsg || 'idk how to tell you but... Something went wrong.',
+          silent: false,
+        });
+        notif.on('click', () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        });
+        notif.show();
+      }
+    },
+  );
+
+  activeDownloads.set(downloadId, { process: proc, options: downloadOptions, cancelled: false });
+  return { id: downloadId };
 });
 
-ipcMain.handle('cancel-download', async () => {
-  if (activeDownloadProcess) {
-    downloadCancelled = true;
-    activeDownloadProcess.kill('SIGTERM');
-    activeDownloadProcess = null;
-    return { cancelled: true };
+ipcMain.handle('fetch-media-info', async (_event, url) => {
+  return await fetchMediaInfo(url);
+});
+
+ipcMain.handle('fetch-carousel-videos', async (_event, url) => {
+  return await fetchCarouselVideos(url);
+});
+
+ipcMain.handle('download-image', async (_event, options) => {
+  const downloadPath = options.outputPath || store.get('downloadPath');
+
+  if (!pathExists(downloadPath)) {
+    try {
+      fs.mkdirSync(downloadPath, { recursive: true });
+    } catch {
+      throw new Error('Cannot save to this folder. Pick another folder.');
+    }
   }
-  return { cancelled: false };
+
+  const freeSpace = await checkDiskSpace(downloadPath);
+  if (freeSpace < 50 * 1024 * 1024) {
+    throw new Error('Not enough disk space. Free some space or switch drives.');
+  }
+
+  try {
+    fs.accessSync(downloadPath, fs.constants.W_OK);
+  } catch {
+    throw new Error('Cannot write to this folder. Pick another folder.');
+  }
+
+  const result = await downloadImage(options.url, downloadPath, options.filename || 'image', options.mediaType);
+
+  if (Notification.isSupported()) {
+    const notif = new Notification({
+      title: 'you downloaded an image, well fucking done',
+      body: options.title || options.filename || 'Image saved, fam',
+      silent: false,
+    });
+    notif.on('click', () => {
+      if (result.filePath) shell.showItemInFolder(result.filePath);
+    });
+    notif.show();
+  }
+
+  if (store.get('showInFinder') && result.filePath) {
+    shell.showItemInFolder(result.filePath);
+  }
+
+  const historyEntry = {
+    id: crypto.randomUUID(),
+    videoId: '',
+    title: options.title || options.filename || 'Instagram post, mother fucka',
+    uploader: options.postOwner || '',
+    channel: options.postOwner || '',
+    channelUrl: '',
+    webpageUrl: options.webpageUrl || '',
+    uploadDate: '',
+    description: (options.caption || '').slice(0, 300),
+    duration: 0,
+    viewCount: null,
+    likeCount: null,
+    categories: [],
+    tags: [],
+    license: '',
+    quality: 'best',
+    clipStart: null,
+    clipEnd: null,
+    filePath: result.filePath,
+    fileSize: result.fileSize,
+    format: path.extname(result.filePath).replace('.', '').toLowerCase() || 'jpg',
+    downloadedAt: new Date().toISOString(),
+    platform: 'instagram',
+    mediaType: options.mediaType || 'image',
+  };
+
+  const history = store.get('downloadHistory');
+  history.unshift(historyEntry);
+  if (history.length > 500) history.length = 500;
+  store.set('downloadHistory', history);
+
+  return { filePath: result.filePath, fileSize: result.fileSize };
+});
+
+ipcMain.handle('cancel-download', async (_event, downloadId) => {
+  if (downloadId) {
+    const entry = activeDownloads.get(downloadId);
+    if (entry) {
+      entry.cancelled = true;
+      entry.process.kill('SIGTERM');
+      return { cancelled: true };
+    }
+    return { cancelled: false };
+  }
+  for (const [, entry] of activeDownloads) {
+    entry.cancelled = true;
+    entry.process.kill('SIGTERM');
+  }
+  return { cancelled: true };
 });
 
 ipcMain.handle('select-folder', async () => {
   const dialogOpts = {
     properties: ['openDirectory', 'createDirectory'],
-    title: 'Choose Download Folder, You Party Pooper',
+    title: 'Pick a folder, mother fucka',
     defaultPath: store.get('downloadPath'),
   };
   const result = mainWindow && !mainWindow.isDestroyed()
@@ -298,10 +439,11 @@ ipcMain.handle('get-settings', async () => {
     downloadPath: store.get('downloadPath'),
     quality: store.get('quality'),
     autoPaste: store.get('autoPaste'),
+    showInFinder: store.get('showInFinder'),
   };
 });
 
-const ALLOWED_SETTINGS = new Set(['quality', 'autoPaste', 'downloadPath']);
+const ALLOWED_SETTINGS = new Set(['quality', 'autoPaste', 'downloadPath', 'showInFinder']);
 
 ipcMain.handle('set-setting', async (_event, key, value) => {
   if (!ALLOWED_SETTINGS.has(key)) return;
@@ -389,12 +531,11 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
-  if (activeDownloadProcess) {
-    const proc = activeDownloadProcess;
-    activeDownloadProcess = null;
-    proc.kill('SIGTERM');
+  for (const [, entry] of activeDownloads) {
+    try { entry.process.kill('SIGTERM'); } catch { /* already dead */ }
     setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+      try { entry.process.kill('SIGKILL'); } catch { /* already dead */ }
     }, 3000);
   }
+  activeDownloads.clear();
 });

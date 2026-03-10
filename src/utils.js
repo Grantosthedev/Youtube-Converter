@@ -2,10 +2,31 @@ const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
 
+// SYNC: These regexes are duplicated in src/renderer/renderer.js for instant UI feedback.
+// If you change them here, update the renderer copy too.
 const YOUTUBE_URL_REGEX = /^https?:\/\/(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?.*v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+const INSTAGRAM_URL_REGEX = /^https?:\/\/(?:www\.)?instagram\.com\/(?:p|reel|reels|tv|stories|share)\/[\w.-]+/;
+const TIKTOK_URL_REGEX = /^https?:\/\/(?:(?:www|m)\.)?tiktok\.com\/@[\w.-]+\/(?:video|photo)\/\d+|^https?:\/\/(?:vm|vt)\.tiktok\.com\/[\w]+|^https?:\/\/(?:(?:www|m)\.)?tiktok\.com\/t\/[\w]+/;
 
 function isValidYouTubeURL(url) {
   return YOUTUBE_URL_REGEX.test(url.trim());
+}
+
+function isValidURL(url) {
+  const trimmed = url.trim();
+  return YOUTUBE_URL_REGEX.test(trimmed) || INSTAGRAM_URL_REGEX.test(trimmed) || TIKTOK_URL_REGEX.test(trimmed);
+}
+
+function detectPlatform(url) {
+  const trimmed = url.trim();
+  if (YOUTUBE_URL_REGEX.test(trimmed)) return 'youtube';
+  if (INSTAGRAM_URL_REGEX.test(trimmed)) return 'instagram';
+  if (TIKTOK_URL_REGEX.test(trimmed)) return 'tiktok';
+  return null;
+}
+
+function isTiktokPhotoUrl(url) {
+  return /\/photo\//.test(url.trim());
 }
 
 function extractVideoId(url) {
@@ -93,6 +114,9 @@ function pathExists(dirPath) {
 
 module.exports = {
   isValidYouTubeURL,
+  isValidURL,
+  detectPlatform,
+  isTiktokPhotoUrl,
   extractVideoId,
   normalizeYouTubeURL,
   sanitizeFilename,
