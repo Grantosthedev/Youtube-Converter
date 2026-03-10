@@ -27,7 +27,7 @@
         </div>
         <div id="queueList" class="queue-panel__list"></div>
         <div id="queueEmpty" class="queue-panel__empty visible">
-          <div class="queue-panel__empty-icon">😢</div>
+          <img src="stickers/empty.png" class="queue-panel__empty-icon" alt="" draggable="false">
           <div class="queue-panel__empty-text">No downloads yet fam, go and steal some videos already</div>
         </div>
       </div>
@@ -151,8 +151,8 @@
   <div id="statusMessage" class="status-message">
     <span class="status-message__icon" id="statusIcon"></span>
     <span class="status-message__text" id="statusText"></span>
-    <button id="statusCopy" class="status-copy-btn">Copy</button>
-    <button id="statusRetry" class="status-retry-btn" style="display:none">Retry</button>
+    <button id="statusCopy" class="status-action-btn" style="display:none"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    <button id="statusRetry" class="status-action-btn" style="display:none">Retry</button>
   </div>
 
   <!-- History View (full-screen overlay, outside .app) -->
@@ -187,6 +187,7 @@
     <div id="historyList" class="history-list"></div>
 
     <div id="historyEmpty" class="history-empty">
+      <img src="stickers/empty.png" class="history-empty__sticker" alt="" draggable="false">
       <span>No downloads yet. Go download something.</span>
     </div>
   </div>

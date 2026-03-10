@@ -247,8 +247,11 @@ input, button {
 }
 
 .queue-panel__empty-icon {
-  font-size: 28px;
-  opacity: 0.6;
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  opacity: 0.9;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4));
 }
 
 .queue-panel__empty-text {
@@ -1090,26 +1093,7 @@ input, button {
   letter-spacing: 0.3px;
 }
 
-/* ============================================================
-   Retry Button (status bar)
-   ============================================================ */
-
-.status-retry-btn {
-  font-size: 11px;
-  color: var(--red-bright);
-  background: transparent;
-  border: 1.5px solid rgba(226,0,0,0.3);
-  border-radius: var(--radius-pill);
-  height: 24px;
-  padding: 0 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: transform 200ms var(--spring);
-}
-
-.status-retry-btn:hover {
-  transform: scale(1.03);
-}
+/* Retry button now uses shared .status-action-btn class */
 
 /* Skeleton */
 .video-card.loading .video-card__thumb-wrap,
@@ -1322,6 +1306,7 @@ input, button {
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(-14px);
+  -webkit-app-region: no-drag;
   transition:
     opacity 220ms var(--ease),
     transform 380ms var(--spring);
@@ -1366,31 +1351,41 @@ input, button {
   word-break: break-word;
 }
 
-.status-copy-btn {
+.status-action-btn {
   flex-shrink: 0;
-  background: rgba(255,255,255,0.1);
-  color: inherit;
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: transparent;
+  color: var(--red-bright);
+  border: 1.5px solid rgba(226,0,0,0.3);
+  border-radius: var(--radius-pill);
+  height: 24px;
+  padding: 0 10px;
   font-size: 11px;
-  padding: 3px 9px;
   cursor: pointer;
-  margin-top: 1px;
   white-space: nowrap;
+  -webkit-app-region: no-drag;
   transition: background 150ms var(--ease), transform 150ms var(--spring);
-  display: none;
 }
 
-.status-copy-btn:hover {
-  background: rgba(255,255,255,0.18);
+.status-action-btn:hover {
+  background: rgba(226,0,0,0.1);
 }
 
-.status-copy-btn:active {
+.status-action-btn:active {
   transform: scale(0.94);
 }
 
-.status-message.error .status-copy-btn {
-  display: inline-flex;
-  align-items: center;
+.status-action-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* ============================================================
@@ -1969,8 +1964,10 @@ input, button {
 .history-empty {
   display: none;
   flex: 1;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 16px;
   color: var(--grey-muted);
   font-size: 14px;
   padding-bottom: 60px;
@@ -1978,6 +1975,13 @@ input, button {
 
 .history-empty.visible {
   display: flex;
+}
+
+.history-empty__sticker {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 16px rgba(0,0,0,0.4));
 }
 
 /* ============================================================

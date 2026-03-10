@@ -497,7 +497,12 @@ function showStatus(type, message) {
   statusMessage.className = `status-message ${type}`;
   statusIcon.textContent = icons[type] || '';
   statusText.textContent = message;
-  if (type !== 'error') statusRetry.style.display = 'none';
+  if (type === 'error') {
+    statusCopy.style.display = '';
+  } else {
+    statusCopy.style.display = 'none';
+    statusRetry.style.display = 'none';
+  }
 
   requestAnimationFrame(() => {
     statusMessage.classList.add('visible');
@@ -515,6 +520,8 @@ function showStatus(type, message) {
 function hideStatus() {
   clearTimeout(statusHideTimer);
   statusMessage.classList.remove('visible');
+  statusCopy.style.display = 'none';
+  statusRetry.style.display = 'none';
 }
 
 statusCopy.addEventListener('click', async () => {
@@ -532,9 +539,9 @@ statusCopy.addEventListener('click', async () => {
     document.execCommand('copy');
     document.body.removeChild(ta);
   }
-  const orig = statusCopy.textContent;
-  statusCopy.textContent = 'Copied!';
-  setTimeout(() => { statusCopy.textContent = orig; }, 1500);
+  const origHTML = statusCopy.innerHTML;
+  statusCopy.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+  setTimeout(() => { statusCopy.innerHTML = origHTML; }, 1500);
 });
 
 function updateDownloadBtnState() {
@@ -1507,7 +1514,6 @@ urlClear.addEventListener('click', () => {
   urlRow.classList.remove('error');
   resetVideoState();
   hideStatus();
-  statusRetry.style.display = 'none';
   urlClear.classList.remove('visible');
   setSticker('default');
 });
