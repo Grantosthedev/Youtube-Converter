@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const fs = require('fs');
 const { getYtdlpPath, getFfmpegPath, sanitizeFilename } = require('./utils');
 const path = require('path');
 
@@ -145,7 +146,7 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
       );
     }
     args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
-  } else {
+  } else if (platform === 'instagram') {
     if (quality === 'hd') {
       args.push(
         '-f',
@@ -157,7 +158,10 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
         'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio/best',
       );
     }
-    args.push('--recode-video', 'mp4');
+    args.push('--merge-output-format', 'mp4');
+    args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
+  } else {
+    args.push('-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4');
     args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
   }
 
@@ -215,6 +219,60 @@ function parseOutputLine(line, state, onProgress) {
   }
 }
 
+function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
+  return new Promise((resolve) => {
+    if (!filePath || !filePath.endsWith('.mp4')) {
+      resolve(filePath);
+      return;
+    }
+
+    const probe = spawn(ffmpegPath, ['-i', filePath], { timeout: 10000 });
+    let probeOutput = '';
+    probe.stderr.on('data', (d) => { probeOutput += d.toString(); });
+
+    probe.on('close', () => {
+      const hasNonH264 = /Video:.*(?:vp[89]|av01|av1)/i.test(probeOutput);
+      const hasH264 = /Video:.*(?:h264|avc)/i.test(probeOutput);
+
+      if (!hasNonH264 || hasH264) {
+        resolve(filePath);
+        return;
+      }
+
+      onProgress({ percent: 98, speed: '', eta: '', status: 'Converting to macOS-compatible format...' });
+
+      const tmpPath = filePath.replace(/\.mp4$/, '.h264.tmp.mp4');
+      const reencode = spawn(ffmpegPath, [
+        '-i', filePath,
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '18',
+        '-c:a', 'aac',
+        '-movflags', '+faststart',
+        '-y',
+        tmpPath,
+      ]);
+
+      reencode.on('close', (code) => {
+        if (code === 0) {
+          try {
+            fs.unlinkSync(filePath);
+            fs.renameSync(tmpPath, filePath);
+          } catch { /* keep original if rename fails */ }
+          resolve(filePath);
+        } else {
+          try { fs.unlinkSync(tmpPath); } catch {}
+          resolve(filePath);
+        }
+      });
+
+      reencode.on('error', () => resolve(filePath));
+    });
+
+    probe.on('error', () => resolve(filePath));
+  });
+}
+
 function startDownload(options, onProgress, onComplete, onError) {
   const ytdlp = getYtdlpPath();
   const ffmpegPath = getFfmpegPath();
@@ -244,7 +302,13 @@ function startDownload(options, onProgress, onComplete, onError) {
 
   proc.on('close', (code) => {
     if (code === 0) {
-      onComplete(parseState.lastFile);
+      const filePath = parseState.lastFile;
+      if (options.platform === 'instagram' && filePath) {
+        ensureMacCompatible(filePath, ffmpegPath, onProgress)
+          .then((finalPath) => onComplete(finalPath));
+      } else {
+        onComplete(filePath);
+      }
     } else {
       onError(mapError(stderrBuf));
     }

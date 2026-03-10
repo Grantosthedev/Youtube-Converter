@@ -650,7 +650,8 @@ async function downloadImage(imageUrl, outputPath, filename, mediaType) {
 
   const uniquePath = getUniquePath(filePath);
 
-  const stream = await httpGet(imageUrl, { stream: true, timeout: IMAGE_DOWNLOAD_TIMEOUT });
+  const dlTimeout = mediaType === 'video' ? 60000 : IMAGE_DOWNLOAD_TIMEOUT;
+  const stream = await httpGet(imageUrl, { stream: true, timeout: dlTimeout });
   const fileStream = fs.createWriteStream(uniquePath);
 
   return new Promise((resolve, reject) => {
@@ -663,8 +664,8 @@ async function downloadImage(imageUrl, outputPath, filename, mediaType) {
       stream.destroy();
       fileStream.destroy();
       try { fs.unlinkSync(uniquePath); } catch { /* ignore */ }
-      reject(new Error('Image download timed out'));
-    }, IMAGE_DOWNLOAD_TIMEOUT);
+      reject(new Error('Download timed out'));
+    }, dlTimeout);
 
     stream.on('data', (chunk) => { bytes += chunk.length; });
     stream.pipe(fileStream);

@@ -392,9 +392,10 @@ ipcMain.handle('download-image', async (_event, options) => {
     }
   } else {
     if (Notification.isSupported()) {
+      const isVideo = options.mediaType === 'video';
       const notif = new Notification({
-        title: 'you downloaded an image, well fucking done',
-        body: options.title || options.filename || 'Image saved, fam',
+        title: isVideo ? 'Reel downloaded, you legend' : 'you downloaded an image, well fucking done',
+        body: options.title || options.filename || (isVideo ? 'Reel saved, fam' : 'Image saved, fam'),
         silent: false,
       });
       notif.on('click', () => {
@@ -406,7 +407,7 @@ ipcMain.handle('download-image', async (_event, options) => {
     const historyEntry = {
       id: crypto.randomUUID(),
       videoId: '',
-      title: options.title || options.filename || 'Instagram post, mother fucka',
+      title: options.title || options.filename || 'Instagram post',
       uploader: options.postOwner || '',
       channel: options.postOwner || '',
       channelUrl: '',

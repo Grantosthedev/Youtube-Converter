@@ -517,14 +517,24 @@ function hideStatus() {
   statusMessage.classList.remove('visible');
 }
 
-statusCopy.addEventListener('click', () => {
+statusCopy.addEventListener('click', async () => {
   const text = statusText.textContent;
   if (!text) return;
-  navigator.clipboard.writeText(text).then(() => {
-    const orig = statusCopy.textContent;
-    statusCopy.textContent = 'Copied!';
-    setTimeout(() => { statusCopy.textContent = orig; }, 1500);
-  });
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+  const orig = statusCopy.textContent;
+  statusCopy.textContent = 'Copied!';
+  setTimeout(() => { statusCopy.textContent = orig; }, 1500);
 });
 
 function updateDownloadBtnState() {
@@ -649,7 +659,7 @@ async function handleUrlChange() {
 
   urlRow.classList.remove('error');
 
-  if (platform === 'instagram' && !/instagram\.com\/(reel|reels|tv)\//i.test(url)) {
+  if (platform === 'instagram') {
     fetchDebounce = setTimeout(() => fetchInstagramContent(url), 300);
   } else {
     fetchDebounce = setTimeout(() => fetchInfo(url), 300);
@@ -761,12 +771,10 @@ async function fetchInstagramContent(url) {
 
     if (mediaInfo && mediaInfo.items && mediaInfo.items.length > 0) {
       if (mediaInfo.isCarousel && mediaInfo.items.length > 1) {
-        state.isFetchingInfo = false;
         showCarouselPicker(mediaInfo, url);
         updateQualityLabels('instagram', 'carousel');
         urlHint.textContent = 'Select items to download';
         urlHint.classList.add('clipboard');
-        updateDownloadBtnState();
 
         if (!mediaInfo.items.some(i => i.type === 'video')) {
           fetchAndMergeCarouselVideos(url);
@@ -777,25 +785,30 @@ async function fetchInstagramContent(url) {
       const singleItem = mediaInfo.items[0];
 
       if (singleItem.type === 'video') {
-        state.isFetchingInfo = false;
-        await fetchInfo(url);
+        showSingleVideoCard(mediaInfo, url);
+        updateQualityLabels('instagram', 'video');
+        urlHint.textContent = 'Reel ready to download';
+        urlHint.classList.add('clipboard');
         return;
       }
 
-      state.isFetchingInfo = false;
       showSingleImageCard(mediaInfo, url);
       updateQualityLabels('instagram', 'image');
       urlHint.textContent = 'Image ready to download';
       urlHint.classList.add('clipboard');
-      updateDownloadBtnState();
       return;
     }
 
-    state.isFetchingInfo = false;
-    await fetchInfo(url);
+    showStatus('error', 'Couldn\'t fetch this Instagram post. It may be private or require login.');
+    lastFailedUrl = url;
+    statusRetry.style.display = '';
   } catch (err) {
+    showStatus('error', err.message || 'Failed to fetch Instagram content. It may be private or require login.');
+    lastFailedUrl = url;
+    statusRetry.style.display = '';
+  } finally {
     state.isFetchingInfo = false;
-    await fetchInfo(url);
+    updateDownloadBtnState();
   }
 }
 
@@ -853,6 +866,41 @@ function showSingleImageCard(mediaInfo, webpageUrl) {
   endTime.disabled = true;
   downloadBtn.disabled = false;
   downloadBtn.textContent = 'Download Image';
+}
+
+function showSingleVideoCard(mediaInfo, webpageUrl) {
+  const item = mediaInfo.items[0];
+
+  state.videoInfo = {
+    id: '',
+    title: mediaInfo.caption ? mediaInfo.caption.slice(0, 80) : `Instagram reel by @${mediaInfo.owner || 'unknown'}`,
+    duration: 0,
+    thumbnail: item.thumbnail || '',
+    isLive: false,
+    formats: [],
+    uploader: mediaInfo.owner || '',
+    platform: 'instagram',
+    mediaType: 'video',
+    _directVideoUrl: item.url,
+    _webpageUrl: webpageUrl,
+    _caption: mediaInfo.caption || '',
+    _owner: mediaInfo.owner || '',
+  };
+
+  videoThumb.classList.remove('loaded');
+  if (item.thumbnail) {
+    videoThumb.src = item.thumbnail;
+    videoThumb.onload = () => videoThumb.classList.add('loaded');
+  }
+  videoTitle.textContent = state.videoInfo.title;
+  videoMeta.textContent = `Instagram · @${mediaInfo.owner || 'unknown'} · Reel`;
+  videoQualities.textContent = item.width && item.height ? `${item.width}×${item.height}` : '';
+
+  videoCard.className = 'video-card visible';
+  startTime.disabled = true;
+  endTime.disabled = true;
+  downloadBtn.disabled = false;
+  downloadBtn.textContent = 'Download Reel';
 }
 
 /* ============================================================
@@ -1104,9 +1152,11 @@ async function handleCarouselDownload() {
 
 statusRetry.addEventListener('click', () => {
   if (lastFailedUrl) {
+    state.isFetchingInfo = false;
+    hideStatus();
     statusRetry.style.display = 'none';
     const platform = detectPlatform(lastFailedUrl);
-    if (platform === 'instagram' && !/instagram\.com\/(reel|reels|tv)\//i.test(lastFailedUrl)) {
+    if (platform === 'instagram') {
       fetchInstagramContent(lastFailedUrl);
     } else {
       fetchInfo(lastFailedUrl);
@@ -1128,24 +1178,105 @@ async function handleDownload() {
 
   if (state.videoInfo._imageUrl) {
     hideStatus();
-    downloadBtn.disabled = true;
+
+    const queueId = `img-${Date.now()}`;
+    const title = state.videoInfo.title || 'instagram_image';
+    addDownloadToQueue(queueId, title, 'best');
+    if (!state.queueOpen) openQueue();
+
+    downloadBtn.classList.add('kick');
+    downloadBtn.addEventListener('animationend', () => downloadBtn.classList.remove('kick'), { once: true });
+
+    const dl = state.downloads.get(queueId);
+    if (dl) { dl.status = 'downloading'; dl.percent = 0; }
+    const pm = progressManagers.get(queueId);
+    if (pm) pm.set(30);
+    updateQueueItem(queueId);
+
     try {
-      await window.api.downloadImage({
+      const result = await window.api.downloadImage({
         url: state.videoInfo._imageUrl,
-        filename: state.videoInfo.title || 'instagram_image',
-        title: state.videoInfo.title,
+        filename: title,
+        title,
         postOwner: state.videoInfo._owner,
         caption: state.videoInfo._caption,
         webpageUrl: state.videoInfo._webpageUrl,
         outputPath: state.downloadPath,
         mediaType: 'image',
       });
-      showStatus('success', 'Image downloaded!');
+
+      if (dl) { dl.status = 'complete'; dl.percent = 100; dl.filePath = result.filePath; }
+      if (pm) {
+        pm.finish();
+        setTimeout(() => { pm.stop(); progressManagers.delete(queueId); updateQueueItem(queueId); }, 600);
+      } else {
+        updateQueueItem(queueId);
+      }
     } catch (err) {
+      if (dl) { dl.status = 'error'; dl.error = err.message || 'Failed to download image.'; }
+      if (pm) pm.stop();
+      progressManagers.delete(queueId);
+      updateQueueItem(queueId);
       showStatus('error', err.message || 'Failed to download image.');
-    } finally {
-      downloadBtn.disabled = false;
-      updateDownloadBtnState();
+    }
+    return;
+  }
+
+  if (state.videoInfo._directVideoUrl) {
+    hideStatus();
+
+    const queueId = `reel-${Date.now()}`;
+    const title = state.videoInfo.title || 'instagram_reel';
+    addDownloadToQueue(queueId, title, 'best');
+    if (!state.queueOpen) openQueue();
+
+    downloadBtn.classList.add('kick');
+    downloadBtn.addEventListener('animationend', () => downloadBtn.classList.remove('kick'), { once: true });
+
+    const dl = state.downloads.get(queueId);
+    if (dl) {
+      dl.status = 'downloading';
+      dl.percent = 0;
+    }
+    const pm = progressManagers.get(queueId);
+    if (pm) pm.set(15);
+    updateQueueItem(queueId);
+
+    try {
+      if (pm) pm.set(40);
+      updateQueueItem(queueId);
+
+      const result = await window.api.downloadImage({
+        url: state.videoInfo._directVideoUrl,
+        filename: title,
+        title,
+        postOwner: state.videoInfo._owner,
+        caption: state.videoInfo._caption,
+        webpageUrl: state.videoInfo._webpageUrl,
+        outputPath: state.downloadPath,
+        mediaType: 'video',
+      });
+
+      if (dl) {
+        dl.status = 'complete';
+        dl.percent = 100;
+        dl.filePath = result.filePath;
+      }
+      if (pm) {
+        pm.finish();
+        setTimeout(() => { pm.stop(); progressManagers.delete(queueId); updateQueueItem(queueId); }, 600);
+      } else {
+        updateQueueItem(queueId);
+      }
+    } catch (err) {
+      if (dl) {
+        dl.status = 'error';
+        dl.error = err.message || 'Failed to download reel.';
+      }
+      if (pm) pm.stop();
+      progressManagers.delete(queueId);
+      updateQueueItem(queueId);
+      showStatus('error', err.message || 'Failed to download reel.');
     }
     return;
   }
