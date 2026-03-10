@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://*.instagram.com https://*.cdninstagram.com https://*.fbcdn.net; img-src 'self' https://*.ytimg.com https://*.ggpht.com https://i.ytimg.com https://*.cdninstagram.com https://*.fbcdn.net https://*.tiktokcdn.com https://*.tiktokcdn-us.com; style-src 'self' 'unsafe-inline'; font-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://*.instagram.com https://*.cdninstagram.com https://*.fbcdn.net; img-src 'self' data: https://*.ytimg.com https://*.ggpht.com https://i.ytimg.com https://*.cdninstagram.com https://*.fbcdn.net https://*.tiktokcdn.com https://*.tiktokcdn-us.com; style-src 'self' 'unsafe-inline'; font-src 'self';">
   <title>DL Buddy</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -36,6 +36,9 @@
 
     <!-- Spacer top -->
     <div class="spacer"></div>
+
+    <!-- Meme Sticker -->
+    <img id="memeSticker" src="stickers/Default.png" class="sticker" alt="" draggable="false">
 
     <!-- Path Display (clickable, right-aligned) -->
     <div id="pathDisplay" class="path-display" title="">~/Downloads/YT Clips</div>
@@ -148,6 +151,7 @@
   <div id="statusMessage" class="status-message">
     <span class="status-message__icon" id="statusIcon"></span>
     <span class="status-message__text" id="statusText"></span>
+    <button id="statusCopy" class="status-copy-btn">Copy</button>
     <button id="statusRetry" class="status-retry-btn" style="display:none">Retry</button>
   </div>
 

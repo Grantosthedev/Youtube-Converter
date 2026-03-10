@@ -6,7 +6,7 @@ const Store = require('electron-store');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos } = require('./ytdlp');
 const { updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate } = require('./updater');
 const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getFfmpegPath, pathExists, checkDiskSpace } = require('./utils');
-const { fetchMediaInfo, downloadImage } = require('./media-fetcher');
+const { fetchMediaInfo, downloadImage, fetchImageAsDataUri } = require('./media-fetcher');
 
 const store = new Store({
   defaults: {
@@ -312,6 +312,10 @@ ipcMain.handle('fetch-carousel-videos', async (_event, url) => {
   return await fetchCarouselVideos(url);
 });
 
+ipcMain.handle('proxy-image', async (_event, url) => {
+  try { return await fetchImageAsDataUri(url); } catch { return null; }
+});
+
 ipcMain.handle('download-image', async (_event, options) => {
   const downloadPath = options.outputPath || store.get('downloadPath');
 
@@ -336,51 +340,98 @@ ipcMain.handle('download-image', async (_event, options) => {
 
   const result = await downloadImage(options.url, downloadPath, options.filename || 'image', options.mediaType);
 
-  if (Notification.isSupported()) {
-    const notif = new Notification({
-      title: 'you downloaded an image, well fucking done',
-      body: options.title || options.filename || 'Image saved, fam',
-      silent: false,
-    });
-    notif.on('click', () => {
-      if (result.filePath) shell.showItemInFolder(result.filePath);
-    });
-    notif.show();
-  }
-
   if (store.get('showInFinder') && result.filePath) {
     shell.showItemInFolder(result.filePath);
   }
 
-  const historyEntry = {
-    id: crypto.randomUUID(),
-    videoId: '',
-    title: options.title || options.filename || 'Instagram post, mother fucka',
-    uploader: options.postOwner || '',
-    channel: options.postOwner || '',
-    channelUrl: '',
-    webpageUrl: options.webpageUrl || '',
-    uploadDate: '',
-    description: (options.caption || '').slice(0, 300),
-    duration: 0,
-    viewCount: null,
-    likeCount: null,
-    categories: [],
-    tags: [],
-    license: '',
-    quality: 'best',
-    clipStart: null,
-    clipEnd: null,
-    filePath: result.filePath,
-    fileSize: result.fileSize,
-    format: path.extname(result.filePath).replace('.', '').toLowerCase() || 'jpg',
-    downloadedAt: new Date().toISOString(),
-    platform: 'instagram',
-    mediaType: options.mediaType || 'image',
-  };
-
   const history = store.get('downloadHistory');
-  history.unshift(historyEntry);
+  const groupId = options.carouselGroupId;
+
+  if (groupId) {
+    const existing = history.find(e => e.carouselGroupId === groupId);
+    const childItem = {
+      filePath: result.filePath,
+      fileSize: result.fileSize,
+      mediaType: options.mediaType || 'image',
+      format: path.extname(result.filePath).replace('.', '').toLowerCase() || 'jpg',
+    };
+
+    if (existing) {
+      existing.carouselItems.push(childItem);
+      existing.fileSize = existing.carouselItems.reduce((sum, ci) => sum + (ci.fileSize || 0), 0);
+    } else {
+      const parentEntry = {
+        id: crypto.randomUUID(),
+        carouselGroupId: groupId,
+        videoId: '',
+        title: options.title || options.filename || 'Instagram carousel',
+        uploader: options.postOwner || '',
+        channel: options.postOwner || '',
+        channelUrl: '',
+        webpageUrl: options.webpageUrl || '',
+        uploadDate: '',
+        description: (options.caption || '').slice(0, 300),
+        duration: 0,
+        viewCount: null,
+        likeCount: null,
+        categories: [],
+        tags: [],
+        license: '',
+        quality: 'best',
+        clipStart: null,
+        clipEnd: null,
+        filePath: result.filePath,
+        fileSize: result.fileSize,
+        format: path.extname(result.filePath).replace('.', '').toLowerCase() || 'jpg',
+        downloadedAt: new Date().toISOString(),
+        platform: 'instagram',
+        mediaType: 'carousel',
+        carouselItems: [childItem],
+      };
+      history.unshift(parentEntry);
+    }
+  } else {
+    if (Notification.isSupported()) {
+      const notif = new Notification({
+        title: 'you downloaded an image, well fucking done',
+        body: options.title || options.filename || 'Image saved, fam',
+        silent: false,
+      });
+      notif.on('click', () => {
+        if (result.filePath) shell.showItemInFolder(result.filePath);
+      });
+      notif.show();
+    }
+
+    const historyEntry = {
+      id: crypto.randomUUID(),
+      videoId: '',
+      title: options.title || options.filename || 'Instagram post, mother fucka',
+      uploader: options.postOwner || '',
+      channel: options.postOwner || '',
+      channelUrl: '',
+      webpageUrl: options.webpageUrl || '',
+      uploadDate: '',
+      description: (options.caption || '').slice(0, 300),
+      duration: 0,
+      viewCount: null,
+      likeCount: null,
+      categories: [],
+      tags: [],
+      license: '',
+      quality: 'best',
+      clipStart: null,
+      clipEnd: null,
+      filePath: result.filePath,
+      fileSize: result.fileSize,
+      format: path.extname(result.filePath).replace('.', '').toLowerCase() || 'jpg',
+      downloadedAt: new Date().toISOString(),
+      platform: 'instagram',
+      mediaType: options.mediaType || 'image',
+    };
+    history.unshift(historyEntry);
+  }
+
   if (history.length > 500) history.length = 500;
   store.set('downloadHistory', history);
 
@@ -461,6 +512,17 @@ ipcMain.handle('get-ytdlp-version', async () => {
 ipcMain.handle('check-app-update', async () => {
   const currentVersion = app.getVersion();
   return await checkAppUpdate(currentVersion);
+});
+
+ipcMain.handle('show-notification', async (_event, title, body, filePath) => {
+  if (Notification.isSupported()) {
+    const notif = new Notification({ title, body, silent: false });
+    notif.on('click', () => {
+      if (filePath) shell.showItemInFolder(filePath);
+      else if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
+    });
+    notif.show();
+  }
 });
 
 ipcMain.handle('get-clipboard', async () => {

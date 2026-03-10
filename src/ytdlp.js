@@ -149,16 +149,15 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
     if (quality === 'hd') {
       args.push(
         '-f',
-        'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-        '--merge-output-format', 'mp4',
+        'bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
       );
     } else {
       args.push(
         '-f',
-        'bestvideo+bestaudio/best',
-        '--merge-output-format', 'mp4',
+        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio/best',
       );
     }
+    args.push('--recode-video', 'mp4');
     args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
   }
 

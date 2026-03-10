@@ -491,6 +491,34 @@ input, button {
 }
 
 /* ============================================================
+   Meme Sticker
+   ============================================================ */
+
+.sticker {
+  height: 220px;
+  width: 220px;
+  object-fit: contain;
+  margin-bottom: 8px;
+  pointer-events: none;
+  filter: drop-shadow(0 4px 24px rgba(0,0,0,0.5));
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.sticker.swap-out {
+  opacity: 0;
+  transform: scale(0.88);
+}
+
+.sticker.swap-in {
+  animation: stickerPop 350ms cubic-bezier(0.32, 1.05, 0.36, 1) forwards;
+}
+
+@keyframes stickerPop {
+  from { opacity: 0; transform: scale(0.82); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ============================================================
    Path Display (clickable, right-aligned)
    ============================================================ */
 
@@ -997,6 +1025,13 @@ input, button {
   opacity: 1;
 }
 
+.carousel-thumb.loading {
+  background-color: rgba(226,0,0,0.08);
+  background-size: 200% 100%;
+  background-image: linear-gradient(90deg, rgba(226,0,0,0.06) 25%, rgba(226,0,0,0.14) 50%, rgba(226,0,0,0.06) 75%);
+  animation: shimmer 1.5s infinite;
+}
+
 .carousel-thumb__check {
   position: absolute;
   top: -6px;
@@ -1275,14 +1310,15 @@ input, button {
   left: 50%;
   z-index: 50;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 8px 18px;
-  border-radius: var(--radius-pill);
+  padding: 10px 16px;
+  border-radius: 18px;
   font-size: 12px;
   width: max-content;
-  max-width: calc(100vw - 48px);
-  white-space: nowrap;
+  max-width: min(520px, calc(100vw - 48px));
+  white-space: normal;
+  line-height: 1.45;
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(-14px);
@@ -1307,6 +1343,7 @@ input, button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  margin-top: 0;
 }
 
 .status-message.success .status-message__icon {
@@ -1319,7 +1356,42 @@ input, button {
   font-weight: 700;
 }
 
-.status-message__text { flex: 1; }
+.status-message__icon {
+  margin-top: 1px;
+}
+
+.status-message__text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.status-copy-btn {
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.1);
+  color: inherit;
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 3px 9px;
+  cursor: pointer;
+  margin-top: 1px;
+  white-space: nowrap;
+  transition: background 150ms var(--ease), transform 150ms var(--spring);
+  display: none;
+}
+
+.status-copy-btn:hover {
+  background: rgba(255,255,255,0.18);
+}
+
+.status-copy-btn:active {
+  transform: scale(0.94);
+}
+
+.status-message.error .status-copy-btn {
+  display: inline-flex;
+  align-items: center;
+}
 
 /* ============================================================
    Drop Overlay

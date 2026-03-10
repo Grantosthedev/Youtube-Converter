@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   fetchMediaInfo: (url) => ipcRenderer.invoke('fetch-media-info', url),
   fetchCarouselVideos: (url) => ipcRenderer.invoke('fetch-carousel-videos', url),
   downloadImage: (options) => ipcRenderer.invoke('download-image', options),
+  proxyImage: (url) => ipcRenderer.invoke('proxy-image', url),
   cancelDownload: (id) => ipcRenderer.invoke('cancel-download', id),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   revealInFinder: (filePath) => ipcRenderer.invoke('reveal-in-finder', filePath),
@@ -21,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteHistoryEntry: (id) => ipcRenderer.invoke('delete-history-entry', id),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  showNotification: (title, body, filePath) => ipcRenderer.invoke('show-notification', title, body, filePath),
 
   onDownloadProgress: (callback) => {
     const listener = (_event, data) => callback(data);

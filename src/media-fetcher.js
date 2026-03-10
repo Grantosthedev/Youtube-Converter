@@ -4,7 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const { sanitizeFilename } = require('./utils');
 
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const IG_MOBILE_UA = 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; samsung; SM-A536B; a53x; qcom; en_US; 458229258)';
+const IG_APP_ID = '936619743392459';
+const USER_AGENT = BROWSER_UA;
 const REQUEST_TIMEOUT = 20000;
 const IMAGE_DOWNLOAD_TIMEOUT = 15000;
 
@@ -79,8 +82,20 @@ function httpGet(url, options = {}) {
    ============================================================ */
 
 function extractShortcode(url) {
-  const m = url.match(/instagram\.com\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/);
+  const m = url.match(/instagram\.com\/(?:p|reel|reels|tv|share)\/([A-Za-z0-9_-]+)/);
   return m ? m[1] : null;
+}
+
+const IG_BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+function shortcodeToMediaId(shortcode) {
+  let id = BigInt(0);
+  for (const char of shortcode) {
+    const idx = IG_BASE64.indexOf(char);
+    if (idx === -1) return null;
+    id = id * BigInt(64) + BigInt(idx);
+  }
+  return id.toString();
 }
 
 function parseOgTags(html) {
@@ -157,6 +172,7 @@ async function fetchEmbedData(shortcode) {
     if (seen.has(key)) continue;
     if (imgUrl.includes('profile_pic')) continue;
     if (imgUrl.includes('/static/')) continue;
+    if (imgUrl.includes('rsrc.php')) continue;
     const pathSize = imgUrl.match(/\/s(\d+)x\d+\//);
     if (pathSize && parseInt(pathSize[1], 10) < 320) continue;
     seen.add(key);
@@ -225,11 +241,12 @@ function parseGraphqlMedia(media) {
     ? new Date(media.taken_at_timestamp * 1000).toISOString()
     : '';
 
-  if (media.__typename === 'GraphSidecar' || media.edge_sidecar_to_children) {
+  const isSidecar = /Sidecar$/i.test(media.__typename || '') || media.edge_sidecar_to_children;
+  if (isSidecar) {
     const edges = media.edge_sidecar_to_children?.edges || [];
     const items = edges.map(edge => {
       const node = edge.node;
-      const isVideo = node.is_video || node.__typename === 'GraphVideo';
+      const isVideo = node.is_video || /Video$/i.test(node.__typename || '');
       return {
         type: isVideo ? 'video' : 'image',
         url: isVideo ? (node.video_url || '') : (node.display_url || ''),
@@ -242,7 +259,7 @@ function parseGraphqlMedia(media) {
     return { isCarousel: true, owner, caption, timestamp, items };
   }
 
-  const isVideo = media.is_video || media.__typename === 'GraphVideo';
+  const isVideo = media.is_video || /Video$/i.test(media.__typename || '');
   return {
     isCarousel: false,
     owner,
@@ -386,54 +403,216 @@ function buildFromOgTags(ogTags, contentType) {
 }
 
 /* ============================================================
+   HTTP POST helper (for GraphQL endpoint)
+   ============================================================ */
+
+function httpPost(url, body, options = {}) {
+  return new Promise((resolve, reject) => {
+    const timeout = options.timeout || REQUEST_TIMEOUT;
+    const parsed = new URL(url);
+    const proto = parsed.protocol === 'https:' ? https : http;
+
+    const req = proto.request({
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body),
+        ...(options.headers || {}),
+      },
+      timeout,
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+      res.on('error', reject);
+    });
+
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+/* ============================================================
+   Layer 1: Instagram GraphQL POST endpoint (no auth required)
+   Uses doc_id-based query — most reliable for public posts.
+   ============================================================ */
+
+const GQL_DOC_ID = '10015901848480474';
+const GQL_LSD = 'AVqbxe3J_YA';
+
+async function fetchGraphqlPost(shortcode) {
+  const postBody = new URLSearchParams({
+    variables: JSON.stringify({ shortcode }),
+    doc_id: GQL_DOC_ID,
+    lsd: GQL_LSD,
+  }).toString();
+
+  const body = await httpPost('https://www.instagram.com/api/graphql', postBody, {
+    timeout: 12000,
+    headers: {
+      'User-Agent': BROWSER_UA,
+      'X-IG-App-ID': IG_APP_ID,
+      'X-FB-LSD': GQL_LSD,
+      'X-ASBD-ID': '129477',
+      'Sec-Fetch-Site': 'same-origin',
+      'Referer': 'https://www.instagram.com/',
+    },
+  });
+
+  const json = JSON.parse(body);
+  const media = json?.data?.xdt_shortcode_media;
+  if (!media) return null;
+
+  return parseGraphqlMedia(media);
+}
+
+/* ============================================================
+   Layer 2: Instagram JSON endpoint (?__a=1&__d=dis)
+   Requires auth/cookies — kept as fallback.
+   ============================================================ */
+
+async function fetchJsonEndpoint(shortcode) {
+  const url = `https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`;
+  const body = await httpGet(url, {
+    timeout: 12000,
+    headers: {
+      'User-Agent': IG_MOBILE_UA,
+      'X-IG-App-ID': IG_APP_ID,
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Referer': 'https://www.instagram.com/',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+  });
+
+  const json = JSON.parse(body);
+  const media = json?.graphql?.shortcode_media
+    || json?.data?.shortcode_media
+    || json?.shortcode_media;
+
+  if (media) return parseGraphqlMedia(media);
+
+  if (json?.items?.[0]) return extractFromApiItem(json.items[0]);
+
+  return null;
+}
+
+/* ============================================================
+   Layer 3: Instagram Mobile API (i.instagram.com)
+   Uses media_id derived from shortcode. Requires auth.
+   ============================================================ */
+
+async function fetchMobileApi(shortcode) {
+  const mediaId = shortcodeToMediaId(shortcode);
+  if (!mediaId) return null;
+
+  const url = `https://i.instagram.com/api/v1/media/${mediaId}/info/`;
+  const body = await httpGet(url, {
+    timeout: 12000,
+    headers: {
+      'User-Agent': IG_MOBILE_UA,
+      'X-IG-App-ID': IG_APP_ID,
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  });
+
+  const json = JSON.parse(body);
+  if (json?.items?.[0]) return extractFromApiItem(json.items[0]);
+
+  return null;
+}
+
+/* ============================================================
    Main entry point: multi-layer media extraction
-   Layer 1: Legacy JSON extraction (rare wins)
-   Layer 2: Embed page (best for carousels)
-   Layer 3: OG meta tags (always available, no carousel items)
+
+   Layer 1: GraphQL POST (no auth, best for carousels)
+   Layer 2: ?__a=1&__d=dis JSON endpoint (needs auth)
+   Layer 3: i.instagram.com mobile API (needs auth)
+   Layer 4: Page HTML embedded JSON (rare wins)
+   Layer 5: Embed page (single-image fallback)
+   Layer 6: OG meta tags (always available, no carousel items)
    ============================================================ */
 
 async function fetchMediaInfo(url) {
   try {
-    const html = await httpGet(url);
+    const shortcode = extractShortcode(url);
 
-    if ((html.includes('login') && html.includes('not logged in')) || html.length < 1000) {
-      return null;
+    // Layer 1: GraphQL POST — works without auth, returns all carousel items
+    if (shortcode) {
+      try {
+        const result = await fetchGraphqlPost(shortcode);
+        if (result && result.items.length > 0) return result;
+      } catch { /* continue */ }
     }
 
-    // Layer 1: legacy embedded JSON
-    const jsonData = extractJsonFromHtml(html);
-    if (jsonData) {
-      if (jsonData._ldJson) {
-        const result = extractFromLdJson(jsonData._ldJson);
+    // Layer 2: JSON endpoint — requires auth/cookies
+    if (shortcode) {
+      try {
+        const result = await fetchJsonEndpoint(shortcode);
         if (result && result.items.length > 0) return result;
-      } else {
-        const result = extractMediaFromSharedData(jsonData);
+      } catch { /* continue */ }
+    }
+
+    // Layer 3: Mobile API — requires auth
+    if (shortcode) {
+      try {
+        const result = await fetchMobileApi(shortcode);
         if (result && result.items.length > 0) return result;
+      } catch { /* continue */ }
+    }
+
+    // Layer 4: Fetch the page HTML and try embedded JSON blobs
+    let html;
+    try {
+      html = await httpGet(url);
+    } catch {
+      html = '';
+    }
+
+    if (html && !((html.includes('login') && html.includes('not logged in')) || html.length < 1000)) {
+      const jsonData = extractJsonFromHtml(html);
+      if (jsonData) {
+        if (jsonData._ldJson) {
+          const result = extractFromLdJson(jsonData._ldJson);
+          if (result && result.items.length > 0) return result;
+        } else {
+          const result = extractMediaFromSharedData(jsonData);
+          if (result && result.items.length > 0) return result;
+        }
       }
     }
 
-    // Parse OG tags (needed for Layer 2 and 3)
-    const ogTags = parseOgTags(html);
-    const contentType = detectContentType(html, ogTags);
+    const ogTags = html ? parseOgTags(html) : {};
+    const resolvedShortcode = shortcode || extractShortcode(ogTags['og:url'] || '');
+    const urlContentType = /instagram\.com\/(reel|reels|tv)\//i.test(url) ? 'video' : null;
+    const contentType = urlContentType || (html ? detectContentType(html, ogTags) : 'image');
 
-    // Layer 2: embed page (best for carousels and images)
-    const shortcode = extractShortcode(ogTags['og:url'] || url);
-    if (shortcode) {
+    // Layer 5: Embed page (limited — only gets first carousel image)
+    if (resolvedShortcode) {
       try {
-        const embedResult = await fetchEmbedData(shortcode);
+        const embedResult = await fetchEmbedData(resolvedShortcode);
         if (embedResult && embedResult.items.length > 0) {
-          // OG tags reliably indicate video content (reels) — override
-          // embed page if it scraped stray chrome images alongside the video.
           if (contentType === 'video') {
             embedResult.isCarousel = false;
             const videoItems = embedResult.items.filter(i => i.type === 'video');
             embedResult.items = videoItems.length > 0 ? [videoItems[0]] : [embedResult.items[0]];
           }
 
-          // URL-based carousel hint: img_index param is definitive proof
           if (/[?&]img_index=/.test(url) && embedResult.items.length > 1) {
             embedResult.isCarousel = true;
           }
+
+          embedResult._fromEmbed = true;
 
           const fallbackThumb = ogTags['og:image'] || '';
           if (fallbackThumb) {
@@ -443,10 +622,10 @@ async function fetchMediaInfo(url) {
           }
           return embedResult;
         }
-      } catch { /* continue to layer 3 */ }
+      } catch { /* continue */ }
     }
 
-    // Layer 3: construct from OG tags
+    // Layer 6: OG meta tags
     const ogResult = buildFromOgTags(ogTags, contentType);
     if (ogResult) {
       ogResult._contentType = contentType;
@@ -534,4 +713,46 @@ function getUniquePath(filePath) {
   return path.join(dir, `${base} (${i})${ext}`);
 }
 
-module.exports = { fetchMediaInfo, downloadImage };
+function fetchImageAsDataUri(imageUrl) {
+  return new Promise((resolve, reject) => {
+    let redirects = 0;
+
+    function doFetch(targetUrl) {
+      if (redirects > 5) { reject(new Error('Too many redirects')); return; }
+
+      const proto = targetUrl.startsWith('https') ? https : http;
+      const req = proto.get(targetUrl, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Referer': 'https://www.instagram.com/',
+          'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        },
+        timeout: 8000,
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          redirects++;
+          res.resume();
+          doFetch(res.headers.location);
+          return;
+        }
+        if (res.statusCode !== 200) { res.resume(); reject(new Error(`HTTP ${res.statusCode}`)); return; }
+
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          const mime = res.headers['content-type'] || 'image/jpeg';
+          resolve(`data:${mime};base64,${buffer.toString('base64')}`);
+        });
+        res.on('error', reject);
+      });
+
+      req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+      req.on('error', reject);
+    }
+
+    doFetch(imageUrl);
+  });
+}
+
+module.exports = { fetchMediaInfo, downloadImage, fetchImageAsDataUri };

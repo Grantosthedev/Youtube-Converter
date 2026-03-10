@@ -77,6 +77,7 @@ const carouselGrid = $('#carouselGrid');
 const carouselSelectAll = $('#carouselSelectAll');
 const carouselCount = $('#carouselCount');
 const statusRetry = $('#statusRetry');
+const statusCopy = $('#statusCopy');
 const btnHint = $('#btnHint');
 
 /* ============================================================
@@ -357,7 +358,12 @@ queueList.addEventListener('click', (e) => {
     if (!id) return;
     const dl = state.downloads.get(id);
     if (dl && (dl.status === 'preparing' || dl.status === 'downloading')) {
-      window.api.cancelDownload(id);
+      if (dl.isCarousel) {
+        const tracker = activeCarouselDownloads.get(id);
+        if (tracker) tracker.cancelled = true;
+      } else {
+        window.api.cancelDownload(id);
+      }
     } else {
       removeQueueItem(id);
     }
@@ -443,6 +449,43 @@ settingsBackdrop.addEventListener('click', () => {
 });
 
 /* ============================================================
+   Meme Sticker
+   ============================================================ */
+
+const memeSticker = $('#memeSticker');
+
+const STICKERS = {
+  default: ['stickers/Default.avif', 'stickers/Default.png'],
+  good: [
+    'stickers/good1.avif',  'stickers/good2.avif',  'stickers/good3.avif',
+    'stickers/good4.avif',  'stickers/good5.avif',  'stickers/good6.avif',
+    'stickers/good7.avif',  'stickers/good8.avif',  'stickers/good9.avif',
+    'stickers/good10.avif', 'stickers/good11.avif', 'stickers/good12.avif',
+    'stickers/good13.webp',
+  ],
+  bad: [
+    'stickers/bad1.avif', 'stickers/bad2.avif', 'stickers/bad3.avif',
+    'stickers/bad4.avif', 'stickers/bad.webp',  'stickers/bad5.webp',
+    'stickers/bad6.webp',
+  ],
+};
+
+function setSticker(type) {
+  const pool = STICKERS[type] || STICKERS.default;
+  const src = pool[Math.floor(Math.random() * pool.length)];
+
+  memeSticker.classList.add('swap-out');
+  setTimeout(() => {
+    memeSticker.src = src;
+    memeSticker.classList.remove('swap-out');
+    memeSticker.classList.add('swap-in');
+    memeSticker.addEventListener('animationend', () => {
+      memeSticker.classList.remove('swap-in');
+    }, { once: true });
+  }, 150);
+}
+
+/* ============================================================
    Status & UI Updates
    ============================================================ */
 
@@ -460,6 +503,10 @@ function showStatus(type, message) {
     statusMessage.classList.add('visible');
   });
 
+  if (type === 'success') setSticker('good');
+  else if (type === 'error') setSticker('bad');
+  else if (type === 'warning') setSticker('bad');
+
   if (type !== 'error') {
     statusHideTimer = setTimeout(() => hideStatus(), 8000);
   }
@@ -469,6 +516,16 @@ function hideStatus() {
   clearTimeout(statusHideTimer);
   statusMessage.classList.remove('visible');
 }
+
+statusCopy.addEventListener('click', () => {
+  const text = statusText.textContent;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = statusCopy.textContent;
+    statusCopy.textContent = 'Copied!';
+    setTimeout(() => { statusCopy.textContent = orig; }, 1500);
+  });
+});
 
 function updateDownloadBtnState() {
   if (state.carouselData) {
@@ -592,7 +649,7 @@ async function handleUrlChange() {
 
   urlRow.classList.remove('error');
 
-  if (platform === 'instagram') {
+  if (platform === 'instagram' && !/instagram\.com\/(reel|reels|tv)\//i.test(url)) {
     fetchDebounce = setTimeout(() => fetchInstagramContent(url), 300);
   } else {
     fetchDebounce = setTimeout(() => fetchInfo(url), 300);
@@ -809,7 +866,10 @@ function showCarouselPicker(data, webpageUrl) {
   carouselTitle.textContent = `@${data.owner || 'unknown'} · ${data.items.length} items`;
   carouselGrid.innerHTML = '';
 
-  data.items.forEach((item, i) => appendCarouselThumb(item, i));
+  data.items.forEach((item, i) => {
+    state.carouselSelected.add(i);
+    appendCarouselThumb(item, i, true);
+  });
 
   carouselCard.classList.add('visible');
   videoCard.className = 'video-card';
@@ -818,16 +878,28 @@ function showCarouselPicker(data, webpageUrl) {
   updateDownloadBtnState();
 }
 
-function appendCarouselThumb(item, i) {
+function appendCarouselThumb(item, i, selected = false) {
   const thumb = document.createElement('div');
-  thumb.className = 'carousel-thumb';
-  const thumbUrl = (item.thumbnail || item.url).replace(/["\\]/g, '\\$&');
-  thumb.style.backgroundImage = `url("${thumbUrl}")`;
+  thumb.className = `carousel-thumb loading${selected ? ' selected' : ''}`;
   thumb.dataset.index = i;
   thumb.innerHTML = `
     <span class="carousel-thumb__check">✓</span>
     <span class="carousel-thumb__type">${item.type === 'video' ? 'VID' : 'IMG'}</span>
   `;
+
+  const thumbUrl = item.thumbnail || item.url;
+  if (thumbUrl) {
+    window.api.proxyImage(thumbUrl).then((dataUri) => {
+      if (dataUri) {
+        thumb.style.backgroundImage = `url("${dataUri}")`;
+      }
+      thumb.classList.remove('loading');
+    }).catch(() => {
+      thumb.classList.remove('loading');
+    });
+  } else {
+    thumb.classList.remove('loading');
+  }
 
   thumb.addEventListener('click', () => {
     if (state.carouselSelected.has(i)) {
@@ -875,16 +947,65 @@ carouselSelectAll.addEventListener('click', () => {
   updateCarouselCount();
 });
 
+const activeCarouselDownloads = new Map();
+
 async function handleCarouselDownload() {
   if (!state.carouselData || state.carouselSelected.size === 0) return;
 
   downloadBtn.disabled = true;
   const data = state.carouselData;
   const selected = [...state.carouselSelected].sort((a, b) => a - b);
+  const total = selected.length;
+  const title = data.caption
+    ? data.caption.slice(0, 60)
+    : `@${data.owner || 'unknown'} carousel`;
+  const queueId = `carousel-${Date.now()}`;
+
+  const carouselGroupId = queueId;
+
+  state.downloads.set(queueId, {
+    id: queueId, title, quality: 'best',
+    percent: 0, speed: '', status: 'downloading',
+    filePath: '', error: '', isCarousel: true,
+    carouselTotal: total, carouselDone: 0, carouselErrors: 0,
+  });
+
+  const el = document.createElement('div');
+  el.className = 'queue-item downloading';
+  el.dataset.id = queueId;
+  el.innerHTML = `
+    <div class="queue-item__row">
+      <span class="queue-item__title">${escapeHtml(title)}</span>
+      <button class="queue-item__action" aria-label="Cancel">✕</button>
+    </div>
+    <div class="queue-item__bar">
+      <div class="queue-item__fill downloading" style="width: 0%"></div>
+    </div>
+    <div class="queue-item__row">
+      <span class="queue-item__detail">0 of ${total} items...</span>
+      <span class="queue-item__quality">${total} items</span>
+    </div>
+  `;
+
+  queueList.prepend(el);
+  queueElements.set(queueId, el);
+
+  queueBtn.classList.add('nudge');
+  queueBtn.addEventListener('animationend', () => queueBtn.classList.remove('nudge'), { once: true });
+  if (!state.queueOpen) openQueue();
+  updateQueueBadge();
+  updateQueueEmpty();
+
+  activeCarouselDownloads.set(queueId, { cancelled: false });
+
   let downloadedCount = 0;
   let errorCount = 0;
+  const filePaths = [];
 
   for (const idx of selected) {
+    const tracker = activeCarouselDownloads.get(queueId);
+    if (tracker?.cancelled) break;
+
     const item = data.items[idx];
     if (!item) continue;
 
@@ -893,7 +1014,7 @@ async function handleCarouselDownload() {
       : `instagram_${idx + 1}`;
 
     try {
-      await window.api.downloadImage({
+      const result = await window.api.downloadImage({
         url: item.url,
         filename: baseName,
         title: data.caption ? data.caption.slice(0, 80) : `Instagram post by @${data.owner}`,
@@ -902,22 +1023,78 @@ async function handleCarouselDownload() {
         webpageUrl: data.webpageUrl,
         outputPath: state.downloadPath,
         mediaType: item.type,
+        carouselGroupId,
       });
       downloadedCount++;
+      if (result?.filePath) filePaths.push(result.filePath);
     } catch (err) {
       errorCount++;
     }
+
+    const done = downloadedCount + errorCount;
+    const pct = Math.round((done / total) * 100);
+    const dl = state.downloads.get(queueId);
+    if (dl) {
+      dl.percent = pct;
+      dl.carouselDone = downloadedCount;
+      dl.carouselErrors = errorCount;
+    }
+
+    const fill = el.querySelector('.queue-item__fill');
+    const detail = el.querySelector('.queue-item__detail');
+    if (fill) fill.style.width = `${pct}%`;
+    if (detail) detail.textContent = `${done} of ${total} items${errorCount > 0 ? ` (${errorCount} failed)` : ''}`;
   }
 
+  activeCarouselDownloads.delete(queueId);
+
+  const dl = state.downloads.get(queueId);
+  const wasCancelled = activeCarouselDownloads.get(queueId)?.cancelled;
+
+  if (wasCancelled) {
+    if (dl) dl.status = 'cancelled';
+    const detail = el.querySelector('.queue-item__detail');
+    const fill = el.querySelector('.queue-item__fill');
+    if (fill) fill.className = 'queue-item__fill cancelled';
+    if (detail) detail.textContent = `Cancelled — ${downloadedCount} of ${total} saved`;
+    el.className = 'queue-item cancelled';
+  } else if (errorCount > 0 && downloadedCount === 0) {
+    if (dl) { dl.status = 'error'; dl.error = `All ${errorCount} items failed`; }
+    const detail = el.querySelector('.queue-item__detail');
+    const fill = el.querySelector('.queue-item__fill');
+    if (fill) fill.className = 'queue-item__fill error';
+    if (detail) detail.textContent = `All ${errorCount} items failed`;
+    el.className = 'queue-item error';
+  } else {
+    if (dl) { dl.status = 'complete'; dl.percent = 100; dl.filePath = filePaths[0] || ''; }
+    const detail = el.querySelector('.queue-item__detail');
+    const fill = el.querySelector('.queue-item__fill');
+    if (fill) { fill.className = 'queue-item__fill complete'; fill.style.width = '100%'; }
+    const svg = '<svg class="check-icon" viewBox="0 0 12 12"><circle cx="6" cy="6" r="6"/><path d="M3.5 6.5l2 2 3-4"/></svg>';
+    if (detail) detail.innerHTML = svg + `${downloadedCount} of ${total} saved${errorCount > 0 ? ` (${errorCount} failed)` : ''}`;
+    el.className = 'queue-item complete';
+
+    if (filePaths.length > 0 && !el.querySelector('.queue-item__show-file')) {
+      const btn = document.createElement('button');
+      btn.className = 'queue-item__show-file';
+      btn.textContent = 'Show Files';
+      detail.parentNode.appendChild(btn);
+    }
+  }
+
+  updateQueueBadge();
+  updateQueueEmpty();
   downloadBtn.disabled = false;
   updateDownloadBtnState();
 
   if (errorCount > 0 && downloadedCount > 0) {
     showStatus('warning', `Downloaded ${downloadedCount} items, ${errorCount} failed.`);
-  } else if (errorCount > 0) {
-    showStatus('error', `Failed to download ${errorCount} items.`);
+    window.api.showNotification('Carousel partially done', `${downloadedCount} of ${total} saved`, filePaths[0] || '');
+  } else if (errorCount > 0 && downloadedCount === 0) {
+    showStatus('error', `Failed to download all ${errorCount} items.`);
   } else {
     showStatus('success', `Downloaded ${downloadedCount} item${downloadedCount > 1 ? 's' : ''}.`);
+    window.api.showNotification('Carousel downloaded, you absolute legend', `${downloadedCount} item${downloadedCount > 1 ? 's' : ''} saved`, filePaths[0] || '');
   }
 }
 
@@ -929,7 +1106,7 @@ statusRetry.addEventListener('click', () => {
   if (lastFailedUrl) {
     statusRetry.style.display = 'none';
     const platform = detectPlatform(lastFailedUrl);
-    if (platform === 'instagram') {
+    if (platform === 'instagram' && !/instagram\.com\/(reel|reels|tv)\//i.test(lastFailedUrl)) {
       fetchInstagramContent(lastFailedUrl);
     } else {
       fetchInfo(lastFailedUrl);
@@ -1201,6 +1378,7 @@ urlClear.addEventListener('click', () => {
   hideStatus();
   statusRetry.style.display = 'none';
   urlClear.classList.remove('visible');
+  setSticker('default');
 });
 
 downloadBtn.addEventListener('click', handleDownload);
@@ -1356,11 +1534,11 @@ function getFilteredHistory() {
   let entries = [...state.historyData];
 
   if (state.historyFilter === 'video') {
-    entries = entries.filter(e => e.quality !== 'audio' && e.mediaType !== 'image');
+    entries = entries.filter(e => e.quality !== 'audio' && e.mediaType !== 'image' && e.mediaType !== 'carousel');
   } else if (state.historyFilter === 'audio') {
     entries = entries.filter(e => e.quality === 'audio');
   } else if (state.historyFilter === 'image') {
-    entries = entries.filter(e => e.mediaType === 'image');
+    entries = entries.filter(e => e.mediaType === 'image' || e.mediaType === 'carousel');
   }
 
   if (state.historySearchTerm) {
@@ -1411,14 +1589,24 @@ function createHistoryEntryEl(entry) {
   el.className = 'history-entry';
   el.dataset.id = entry.id;
 
+  const isCarousel = entry.mediaType === 'carousel' && entry.carouselItems?.length > 0;
   const clipInfo = (entry.clipStart && entry.clipStart !== '00:00:00') || (entry.clipEnd && entry.clipEnd !== '00:00:00')
     ? ` (clip ${entry.clipStart || '00:00:00'}–${entry.clipEnd || 'end'})`
     : '';
 
-  const isImage = entry.mediaType === 'image';
+  const isImage = entry.mediaType === 'image' || isCarousel;
   const uploaderText = entry.uploader || entry.channel || '';
   const metaParts = [uploaderText];
-  if (!isImage) metaParts.push(formatDuration(entry.duration) + clipInfo);
+  if (isCarousel) {
+    const imgCount = entry.carouselItems.filter(ci => ci.mediaType !== 'video').length;
+    const vidCount = entry.carouselItems.filter(ci => ci.mediaType === 'video').length;
+    const parts = [];
+    if (imgCount > 0) parts.push(`${imgCount} image${imgCount > 1 ? 's' : ''}`);
+    if (vidCount > 0) parts.push(`${vidCount} video${vidCount > 1 ? 's' : ''}`);
+    metaParts.push(parts.join(', '));
+  } else if (!isImage) {
+    metaParts.push(formatDuration(entry.duration) + clipInfo);
+  }
   const filteredMeta = metaParts.filter(Boolean);
 
   const detailRows = [];
@@ -1438,7 +1626,9 @@ function createHistoryEntryEl(entry) {
   if (!isImage) {
     detailRows.push({ label: 'Duration', value: formatDuration(entry.duration) + clipInfo });
   }
-  if (isImage) {
+  if (isCarousel) {
+    detailRows.push({ label: 'Items', value: `${entry.carouselItems.length} files` });
+  } else if (isImage) {
     detailRows.push({ label: 'Format', value: (entry.format || 'jpg').toUpperCase() });
   } else {
     detailRows.push({ label: 'Quality', value: qualityLabel(entry.quality) + ' · ' + (entry.format || '').toUpperCase() });
@@ -1461,8 +1651,20 @@ function createHistoryEntryEl(entry) {
   if (entry.description) {
     detailRows.push({ label: 'Description', value: entry.description });
   }
-  detailRows.push({ label: 'File', value: entry.filePath || '—', clickToReveal: !!entry.filePath });
-  detailRows.push({ label: 'Size', value: formatFileSize(entry.fileSize) });
+  if (isCarousel) {
+    for (let ci = 0; ci < entry.carouselItems.length; ci++) {
+      const child = entry.carouselItems[ci];
+      detailRows.push({
+        label: `File ${ci + 1}`,
+        value: child.filePath || '—',
+        clickToReveal: !!child.filePath,
+      });
+    }
+    detailRows.push({ label: 'Total Size', value: formatFileSize(entry.fileSize) });
+  } else {
+    detailRows.push({ label: 'File', value: entry.filePath || '—', clickToReveal: !!entry.filePath });
+    detailRows.push({ label: 'Size', value: formatFileSize(entry.fileSize) });
+  }
   detailRows.push({ label: 'Downloaded', value: formatFullDate(entry.downloadedAt) });
 
   const dlHtml = detailRows.map(r => {
@@ -1473,13 +1675,17 @@ function createHistoryEntryEl(entry) {
     return `<dt>${r.label}</dt><dd${r.copyable ? ' class="copyable"' : ''}>${escapeHtml(r.value)}</dd>`;
   }).join('');
 
+  const qualityBadge = isCarousel
+    ? `<span class="history-entry__quality">${entry.carouselItems.length} items</span>`
+    : `<span class="history-entry__quality">${escapeHtml(qualityLabel(entry.quality))}</span>`;
+
   el.innerHTML = `
     <div class="history-entry__header">
       <div class="history-entry__info">
         <div class="history-entry__title">${escapeHtml(entry.title)}</div>
         <div class="history-entry__meta">${escapeHtml(filteredMeta.join(' · '))}</div>
       </div>
-      <span class="history-entry__quality">${escapeHtml(qualityLabel(entry.quality))}</span>
+      ${qualityBadge}
       ${entry.platform && entry.platform !== 'youtube' ? `<span class="history-entry__platform">${escapeHtml(entry.platform)}</span>` : ''}
       <span class="history-entry__date">${escapeHtml(formatRelativeDate(entry.downloadedAt))}</span>
       <span class="history-entry__chevron">
@@ -1506,8 +1712,7 @@ function createHistoryEntryEl(entry) {
     el.classList.toggle('expanded');
   });
 
-  const fileLink = el.querySelector('.file-link');
-  if (fileLink) {
+  el.querySelectorAll('.file-link').forEach(fileLink => {
     fileLink.addEventListener('click', async (e) => {
       e.stopPropagation();
       const fp = fileLink.dataset.filepath;
@@ -1518,7 +1723,7 @@ function createHistoryEntryEl(entry) {
         fileLink.title = 'File was moved or deleted — opened download folder';
       }
     });
-  }
+  });
 
   el.querySelector('[data-action="copyinfo"]').addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -1532,14 +1737,25 @@ function createHistoryEntryEl(entry) {
     if ((entry.clipStart && entry.clipStart !== '00:00:00') || (entry.clipEnd && entry.clipEnd !== '00:00:00')) {
       lines.push(`Clip: ${entry.clipStart || '00:00:00'} – ${entry.clipEnd || 'end'}`);
     }
-    lines.push(`Quality: ${qualityLabel(entry.quality)} · ${(entry.format || '').toUpperCase()}`);
+    if (entry.mediaType === 'carousel' && entry.carouselItems?.length) {
+      lines.push(`Items: ${entry.carouselItems.length} files`);
+    } else {
+      lines.push(`Quality: ${qualityLabel(entry.quality)} · ${(entry.format || '').toUpperCase()}`);
+    }
     if (entry.viewCount != null) lines.push(`Views: ${formatNumber(entry.viewCount)}`);
     if (entry.likeCount != null) lines.push(`Likes: ${formatNumber(entry.likeCount)}`);
     if (entry.categories && entry.categories.length) lines.push(`Categories: ${entry.categories.join(', ')}`);
     if (entry.tags && entry.tags.length) lines.push(`Tags: ${entry.tags.join(', ')}`);
     if (entry.license) lines.push(`License: ${entry.license}`);
-    if (entry.filePath) lines.push(`File: ${entry.filePath}`);
-    if (entry.fileSize) lines.push(`Size: ${formatFileSize(entry.fileSize)}`);
+    if (entry.carouselItems?.length) {
+      entry.carouselItems.forEach((ci, i) => {
+        if (ci.filePath) lines.push(`File ${i + 1}: ${ci.filePath}`);
+      });
+      lines.push(`Total Size: ${formatFileSize(entry.fileSize)}`);
+    } else {
+      if (entry.filePath) lines.push(`File: ${entry.filePath}`);
+      if (entry.fileSize) lines.push(`Size: ${formatFileSize(entry.fileSize)}`);
+    }
     lines.push(`Downloaded: ${formatFullDate(entry.downloadedAt)}`);
 
     try {
