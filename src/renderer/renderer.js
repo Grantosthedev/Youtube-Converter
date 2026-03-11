@@ -24,6 +24,7 @@ const state = {
   mode: 'unhinged',
   activeProject: null,
   projects: [],
+  projectHues: {},
   projectDropdownOpen: false,
   historyProjectFilter: null,
   helpOpen: false,
@@ -137,15 +138,13 @@ function isTiktokPhotoUrl(url) {
   return /\/photo\//.test(url.trim());
 }
 
-function getProjectHue(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  // Map to 40–320° to avoid the app's brand red zone (0–40° and 320–360°)
-  return (h % 280) + 40;
-}
-
 function projectColors(name) {
-  const hue = getProjectHue(name);
+  let hue = state.projectHues?.[name];
+  if (hue == null) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    hue = (h % 280) + 40;
+  }
   return {
     bright: `hsl(${hue}, 85%, 48%)`,
     dark:   `hsl(${hue}, 60%, 13%)`,
@@ -1964,9 +1963,14 @@ function renderProjectList(filter) {
     row.style.setProperty('--proj-bright', c.bright);
     row.style.setProperty('--proj-hover', c.hover);
     const count = counts[name] || 0;
-    row.innerHTML = `<span class="project-dropdown__item-name">${escapeHtml(name)}</span><span class="project-dropdown__item-count">${count}</span>`;
+    row.innerHTML = `
+      <span class="project-dropdown__item-name">${escapeHtml(name)}</span>
+      <span class="project-dropdown__item-count">${count}</span>
+      <span class="project-dropdown__item-delete" title="Delete project">${icon('cancel-01', 'ui-icon ui-icon--sm')}</span>
+    `;
     row.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (e.target.closest('.project-dropdown__item-delete')) return;
       if (state.activeProject === name) {
         setActiveProject(null);
       } else {
@@ -1974,22 +1978,39 @@ function renderProjectList(filter) {
       }
       closeProjectDropdown();
     });
+    row.querySelector('.project-dropdown__item-delete').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteProject(name);
+    });
     projectList.appendChild(row);
   }
 }
 
 async function setActiveProject(name) {
   const result = await window.api.setActiveProject(name);
-  state.activeProject = result;
-  if (result) {
-    const existing = state.projects.filter(p => p !== result);
-    existing.unshift(result);
+  if (result?.name) {
+    state.activeProject = result.name;
+    state.projectHues = result.projectHues;
+    const existing = state.projects.filter(p => p !== result.name);
+    existing.unshift(result.name);
     state.projects = existing;
-    showStatus('info', `Locked into ${result}. Downloads go there now.`);
+    showStatus('info', `Locked into ${result.name}. Downloads go there now.`);
   } else {
+    state.activeProject = null;
     showStatus('info', 'Project cleared. Back to the main dump.');
   }
   updateProjectUI();
+}
+
+async function deleteProject(name) {
+  const result = await window.api.deleteProject(name);
+  state.projects = result.projects;
+  state.projectHues = result.projectHues;
+  if (state.activeProject === name) {
+    state.activeProject = null;
+  }
+  updateProjectUI();
+  renderProjectList(projectInput.value.trim());
 }
 
 projectBtn.addEventListener('click', (e) => {
@@ -2160,10 +2181,11 @@ function formatNumber(n) {
   return n.toLocaleString();
 }
 
-function qualityLabel(q) {
+function qualityLabel(q, resolution) {
+  if (q === 'audio') return 'Audio';
+  if (resolution) return resolution;
   if (q === 'best') return 'Best';
   if (q === 'hd') return '1080p';
-  if (q === 'audio') return 'Audio';
   return q;
 }
 
@@ -2373,7 +2395,7 @@ function createHistoryEntryEl(entry) {
   } else if (isImage) {
     detailRows.push({ label: 'Format', value: (entry.format || 'jpg').toUpperCase() });
   } else {
-    detailRows.push({ label: 'Quality', value: qualityLabel(entry.quality) + ' · ' + (entry.format || '').toUpperCase() });
+    detailRows.push({ label: 'Quality', value: qualityLabel(entry.quality, entry.resolution) + ' · ' + (entry.format || '').toUpperCase() });
   }
   if (entry.viewCount != null) {
     detailRows.push({ label: 'Views', value: formatNumber(entry.viewCount) });
@@ -2422,7 +2444,7 @@ function createHistoryEntryEl(entry) {
 
   const qualityBadge = isCarousel
     ? `<span class="history-entry__quality">${entry.carouselItems.length} items</span>`
-    : `<span class="history-entry__quality">${escapeHtml(qualityLabel(entry.quality))}</span>`;
+    : `<span class="history-entry__quality">${escapeHtml(qualityLabel(entry.quality, entry.resolution))}</span>`;
 
   el.innerHTML = `
     <div class="history-entry__header">
@@ -2484,7 +2506,7 @@ function createHistoryEntryEl(entry) {
     if (entry.mediaType === 'carousel' && entry.carouselItems?.length) {
       lines.push(`Items: ${entry.carouselItems.length} files`);
     } else {
-      lines.push(`Quality: ${qualityLabel(entry.quality)} · ${(entry.format || '').toUpperCase()}`);
+      lines.push(`Quality: ${qualityLabel(entry.quality, entry.resolution)} · ${(entry.format || '').toUpperCase()}`);
     }
     if (entry.viewCount != null) lines.push(`Views: ${formatNumber(entry.viewCount)}`);
     if (entry.likeCount != null) lines.push(`Likes: ${formatNumber(entry.likeCount)}`);
@@ -2658,6 +2680,7 @@ async function init() {
   state.mode = settings.mode || 'unhinged';
   state.activeProject = settings.activeProject || null;
   state.projects = settings.projects || [];
+  state.projectHues = settings.projectHues || {};
   state.historyData = await window.api.getHistory();
   updateProjectUI();
   appVersion.textContent = `v${version}`;

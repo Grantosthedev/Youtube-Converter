@@ -39,6 +39,7 @@ const store = new Store({
     windowBounds: { width: 880, height: 640 },
     downloadHistory: [],
     projects: [],
+    projectHues: {},
     activeProject: null,
     lastYtdlpCheck: 0,
   },
@@ -46,6 +47,47 @@ const store = new Store({
 
 function nt(unhinged, professional) {
   return store.get('mode') === 'professional' ? professional : unhinged;
+}
+
+const SEED_HUES = [180, 280, 80, 230, 130, 310, 55];
+
+function assignOptimalHue(takenHues) {
+  const MIN = 40, MAX = 320, MIN_DIST = 25;
+  const taken = new Set(takenHues);
+
+  for (const seed of SEED_HUES) {
+    if ([...taken].every(h => Math.abs(h - seed) >= MIN_DIST)) return seed;
+  }
+
+  const sorted = [...takenHues].sort((a, b) => a - b);
+  let bestGap = sorted[0] - MIN;
+  let bestMid = MIN + bestGap / 2;
+
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const gap = sorted[i + 1] - sorted[i];
+    if (gap > bestGap) { bestGap = gap; bestMid = sorted[i] + gap / 2; }
+  }
+
+  const lastGap = MAX - sorted[sorted.length - 1];
+  if (lastGap > bestGap) bestMid = sorted[sorted.length - 1] + lastGap / 2;
+
+  return Math.round(bestMid);
+}
+
+function ensureProjectHues() {
+  const projects = store.get('projects');
+  const hues = { ...store.get('projectHues') };
+  let changed = false;
+
+  for (const name of Object.keys(hues)) {
+    if (!projects.includes(name)) { delete hues[name]; changed = true; }
+  }
+  for (const name of projects) {
+    if (hues[name] == null) { hues[name] = assignOptimalHue(Object.values(hues)); changed = true; }
+  }
+
+  if (changed) store.set('projectHues', hues);
+  return hues;
 }
 
 const videoInfoCache = new Map();
@@ -260,6 +302,7 @@ ipcMain.handle('start-download', async (event, options) => {
           tags: cachedInfo.tags || [],
           license: cachedInfo.license || '',
           quality: downloadOptions.quality,
+          resolution: cachedInfo.formats?.[0] || null,
           clipStart: downloadOptions.startTime || null,
           clipEnd: downloadOptions.endTime || null,
           filePath: filePath || '',
@@ -546,6 +589,7 @@ ipcMain.handle('get-settings', async () => {
     mode: store.get('mode'),
     activeProject: store.get('activeProject'),
     projects: store.get('projects'),
+    projectHues: ensureProjectHues(),
   };
 });
 
@@ -625,10 +669,30 @@ ipcMain.handle('set-active-project', async (_event, projectName) => {
     const filtered = projects.filter(p => p !== sanitized);
     filtered.unshift(sanitized);
     store.set('projects', filtered);
-    return sanitized;
+
+    const hues = store.get('projectHues');
+    if (hues[sanitized] == null) {
+      hues[sanitized] = assignOptimalHue(Object.values(hues));
+      store.set('projectHues', hues);
+    }
+
+    return { name: sanitized, projectHues: hues };
   }
   store.set('activeProject', null);
   return null;
+});
+
+ipcMain.handle('delete-project', async (_event, projectName) => {
+  if (!projectName) return { projects: store.get('projects'), projectHues: store.get('projectHues') };
+  const projects = store.get('projects').filter(p => p !== projectName);
+  store.set('projects', projects);
+  const hues = store.get('projectHues');
+  delete hues[projectName];
+  store.set('projectHues', hues);
+  if (store.get('activeProject') === projectName) {
+    store.set('activeProject', null);
+  }
+  return { projects, projectHues: hues };
 });
 
 ipcMain.handle('get-history', async () => {

@@ -2405,6 +2405,26 @@ input, button {
   color: rgba(255,255,255,0.6);
 }
 
+.project-dropdown__item-delete {
+  flex-shrink: 0;
+  opacity: 0;
+  padding: 2px;
+  margin-left: 4px;
+  border-radius: 4px;
+  color: var(--grey-muted);
+  cursor: pointer;
+  transition: opacity 150ms var(--ease), color 150ms var(--ease);
+}
+
+.project-dropdown__item:hover .project-dropdown__item-delete {
+  opacity: 0.6;
+}
+
+.project-dropdown__item-delete:hover {
+  opacity: 1 !important;
+  color: var(--red-bright);
+}
+
 .project-dropdown__hint {
   font-size: 11px;
   color: var(--grey-muted);

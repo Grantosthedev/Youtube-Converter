@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   getProjects: () => ipcRenderer.invoke('get-projects'),
   getActiveProject: () => ipcRenderer.invoke('get-active-project'),
   setActiveProject: (name) => ipcRenderer.invoke('set-active-project', name),
+  deleteProject: (name) => ipcRenderer.invoke('delete-project', name),
   getHistory: () => ipcRenderer.invoke('get-history'),
   deleteHistoryEntry: (id) => ipcRenderer.invoke('delete-history-entry', id),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
