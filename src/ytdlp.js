@@ -213,7 +213,6 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
       } else {
         args.push('--download-sections', `*${start}-inf`);
       }
-      args.push('--force-keyframes-at-cuts');
     }
   }
 
@@ -234,18 +233,34 @@ function parseOutputLine(line, state, onProgress) {
   const mergeMatch = trimmed.match(/Merging formats into "(.+)"/);
   if (mergeMatch) {
     state.lastFile = mergeMatch[1];
+    state.lastPercent = 99.5;
+    onProgress({ percent: 99.5, speed: '', eta: '', status: 'merging' });
     return;
   }
 
   if (trimmed.includes('has already been downloaded')) {
     state.lastFile = trimmed.replace('[download]', '').replace('has already been downloaded', '').trim();
+    state.lastPercent = 100;
     onProgress({ percent: 100, speed: '', eta: '' });
+    return;
+  }
+
+  if (/^\[ExtractAudio\]|^\[FixupM4a\]|^\[ffmpeg\] Fixing/.test(trimmed)) {
+    state.lastPercent = 99.5;
+    onProgress({ percent: 99.5, speed: '', eta: '', status: 'extracting_audio' });
+    return;
+  }
+
+  if (/^\[Fixup\]|^\[MoveFiles\]|^\[FixupTimestamp\]/.test(trimmed)) {
+    state.lastPercent = 99.5;
+    onProgress({ percent: 99.5, speed: '', eta: '', status: 'still_working' });
     return;
   }
 
   const percentMatch = trimmed.match(/([\d.]+)%/);
   if (percentMatch) {
     const percent = parseFloat(percentMatch[1]);
+    state.lastPercent = percent;
     const speedMatch = trimmed.match(/at\s+([\d.]+\S*\/s)/);
     const etaMatch = trimmed.match(/ETA\s+(\d+:\d+)/);
     onProgress({
@@ -254,6 +269,24 @@ function parseOutputLine(line, state, onProgress) {
       eta: etaMatch ? etaMatch[1] : '',
     });
   }
+}
+
+function parseDurationSecs(probeOutput) {
+  const m = probeOutput.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (!m) return 0;
+  return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
+}
+
+function trackFfmpegProgress(proc, durationSecs, onProgress, statusKey) {
+  proc.stderr.on('data', (chunk) => {
+    const text = chunk.toString();
+    const timeMatch = text.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+    if (timeMatch && durationSecs > 0) {
+      const cur = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseFloat(timeMatch[3]);
+      const pct = Math.min(Math.round((cur / durationSecs) * 100), 99);
+      onProgress({ percent: 99.5, speed: '', eta: '', status: statusKey, convertPercent: pct });
+    }
+  });
 }
 
 function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
@@ -281,7 +314,8 @@ function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
         return;
       }
 
-      onProgress({ percent: 98, speed: '', eta: '', status: 'Converting to macOS-compatible format...' });
+      const durationSecs = parseDurationSecs(probeOutput);
+      onProgress({ percent: 99.5, speed: '', eta: '', status: 'converting_mac', convertPercent: 0 });
 
       const tmpPath = filePath.replace(/\.mp4$/, '.compat.tmp.mp4');
 
@@ -296,6 +330,8 @@ function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
         tmpPath,
       ]);
 
+      trackFfmpegProgress(hwEncode, durationSecs, onProgress, 'converting_mac');
+
       let hwFailed = false;
 
       hwEncode.on('close', (hwCode) => {
@@ -304,18 +340,18 @@ function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
           try {
             fs.unlinkSync(filePath);
             fs.renameSync(tmpPath, filePath);
-          } catch { /* keep original if rename fails */ }
+          } catch {}
           resolve(filePath);
           return;
         }
 
         try { fs.unlinkSync(tmpPath); } catch {}
-        softwareEncode(filePath, ffmpegPath, tmpPath, resolve);
+        softwareEncode(filePath, ffmpegPath, tmpPath, durationSecs, onProgress, resolve);
       });
 
       hwEncode.on('error', () => {
         hwFailed = true;
-        softwareEncode(filePath, ffmpegPath, tmpPath, resolve);
+        softwareEncode(filePath, ffmpegPath, tmpPath, durationSecs, onProgress, resolve);
       });
     });
 
@@ -326,7 +362,8 @@ function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
   });
 }
 
-function softwareEncode(filePath, ffmpegPath, tmpPath, resolve) {
+function softwareEncode(filePath, ffmpegPath, tmpPath, durationSecs, onProgress, resolve) {
+  onProgress({ percent: 99.5, speed: '', eta: '', status: 'converting_sw', convertPercent: 0 });
   const swEncode = spawn(ffmpegPath, [
     '-i', filePath,
     '-c:v', 'libx264',
@@ -337,6 +374,8 @@ function softwareEncode(filePath, ffmpegPath, tmpPath, resolve) {
     '-y',
     tmpPath,
   ]);
+
+  trackFfmpegProgress(swEncode, durationSecs, onProgress, 'converting_sw');
 
   swEncode.on('close', (code) => {
     if (code === 0) {
@@ -359,13 +398,28 @@ function startDownload(options, onProgress, onComplete, onError) {
   const ffmpegDir = path.dirname(ffmpegPath);
 
   const args = buildDownloadArgs({ ...options, ffmpegDir });
+  console.log('[yt-dlp] spawn:', args.join(' '));
   const proc = spawn(ytdlp, args);
 
   const MAX_STDERR = 10 * 1024;
   let stderrBuf = '';
-  const parseState = { lastFile: '' };
+  const parseState = { lastFile: '', lastPercent: 0, lastOutputTime: Date.now() };
 
-  const parseLine = (line) => parseOutputLine(line, parseState, onProgress);
+  const parseLine = (line) => {
+    const t = line.trim();
+    if (t) {
+      parseState.lastOutputTime = Date.now();
+      console.log('[yt-dlp]', t);
+    }
+    parseOutputLine(line, parseState, onProgress);
+  };
+
+  const heartbeat = setInterval(() => {
+    const silentMs = Date.now() - parseState.lastOutputTime;
+    if (silentMs >= 5000 && parseState.lastPercent >= 99) {
+      onProgress({ percent: 99.5, speed: '', eta: '', status: 'still_working' });
+    }
+  }, 3000);
 
   proc.stdout.on('data', (data) => {
     data.toString().split('\n').forEach(parseLine);
@@ -381,6 +435,7 @@ function startDownload(options, onProgress, onComplete, onError) {
   });
 
   proc.on('close', (code) => {
+    clearInterval(heartbeat);
     if (code === 0) {
       const filePath = parseState.lastFile;
       if (filePath && filePath.endsWith('.mp4')) {
@@ -395,6 +450,7 @@ function startDownload(options, onProgress, onComplete, onError) {
   });
 
   proc.on('error', (err) => {
+    clearInterval(heartbeat);
     onError(`Failed to run yt-dlp: ${err.message}`);
   });
 

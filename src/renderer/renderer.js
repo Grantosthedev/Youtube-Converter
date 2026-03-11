@@ -232,6 +232,11 @@ const PROFESSIONAL_STRINGS = new Map([
   ['Locked in. Ready to rip.', 'Ready to download.'],
   ['Download crashed and burned, you buffoon. Try again.', 'Download failed. Please try again.'],
   ['Failed to update download engine, what the helly!', 'Download engine update failed.'],
+  ['Stitching video and audio together, chill...', 'Merging video and audio...'],
+  ['Making it work on your fancy Mac...', 'Converting for QuickTime...'],
+  ['Software converting, this ones gonna take a sec...', 'Converting (software fallback)...'],
+  ['Ripping the audio out, one sec...', 'Extracting audio...'],
+  ['Still cookin, hang tight...', 'Still processing...'],
   ['Clear All, champ', 'Clear All'],
   ['No downloads yet. Go download something.', 'No download history yet.'],
   ['Download Image', 'Download Image'],
@@ -478,6 +483,7 @@ function updateQueueItem(id) {
   el.className = `queue-item ${dl.status}`;
   const detail = el.querySelector('.queue-item__detail');
   const fill = el.querySelector('.queue-item__fill');
+  detail.classList.remove('has-stats');
 
   switch (dl.status) {
     case 'preparing':
@@ -486,9 +492,29 @@ function updateQueueItem(id) {
     case 'downloading':
       if (dl.percent >= 99.5) {
         fill.classList.add('processing');
-        detail.textContent = t('Processing clip, sit your ass down...');
+        const STATUS_LABELS = {
+          merging:          t('Stitching video and audio together, chill...'),
+          converting_mac:   t('Making it work on your fancy Mac...'),
+          converting_sw:    t('Software converting, this ones gonna take a sec...'),
+          extracting_audio: t('Ripping the audio out, one sec...'),
+          still_working:    t('Still cookin, hang tight...'),
+        };
+        const statusMsg = STATUS_LABELS[dl.statusKey] || t('Processing clip, sit your ass down...');
+        let stats = '';
+        if (dl.convertPercent > 0) stats += `${dl.convertPercent}%`;
+        if (dl.processingStarted) {
+          const elapsed = Math.floor((Date.now() - dl.processingStarted) / 1000);
+          const mins = Math.floor(elapsed / 60);
+          const secs = elapsed % 60;
+          const timeStr = mins > 0 ? `${mins}:${String(secs).padStart(2, '0')}` : `0:${String(secs).padStart(2, '0')}`;
+          stats += (stats ? ' · ' : '') + timeStr;
+        }
+        detail.classList.add('has-stats');
+        detail.innerHTML = `<span class="queue-item__detail-msg">${escapeHtml(statusMsg)}</span>`
+          + (stats ? `<span class="queue-item__detail-stats">${escapeHtml(stats)}</span>` : '');
       } else {
         fill.classList.remove('processing');
+        detail.classList.remove('has-stats');
         detail.textContent = `${Math.round(dl.percent)}%${dl.speed ? ' · ' + dl.speed : ''}`;
       }
       break;
@@ -559,6 +585,10 @@ queueList.addEventListener('click', (e) => {
       } else {
         window.api.cancelDownload(id);
       }
+      dl.status = 'cancelled';
+      progressManagers.get(id)?.stop();
+      progressManagers.delete(id);
+      updateQueueItem(id);
     } else {
       removeQueueItem(id);
     }
@@ -1634,9 +1664,26 @@ window.api.onDownloadProgress((data) => {
   dl.status = 'downloading';
   dl.percent = data.percent;
   dl.speed = data.speed || '';
+  if (data.status) dl.statusKey = data.status;
+  if (data.convertPercent != null) dl.convertPercent = data.convertPercent;
+  if (data.percent >= 99.5) {
+    if (!dl.processingStarted) dl.processingStarted = Date.now();
+  } else {
+    dl.processingStarted = null;
+    dl.statusKey = null;
+    dl.convertPercent = null;
+  }
   progressManagers.get(data.id)?.set(data.percent);
   updateQueueItem(data.id);
 });
+
+setInterval(() => {
+  for (const [id, dl] of state.downloads) {
+    if (dl.status === 'downloading' && dl.processingStarted) {
+      updateQueueItem(id);
+    }
+  }
+}, 1000);
 
 window.api.onDownloadComplete((data) => {
   const dl = state.downloads.get(data.id);

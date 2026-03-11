@@ -465,6 +465,24 @@ input, button {
   white-space: nowrap;
 }
 
+.queue-item__detail.has-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-item__detail-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.queue-item__detail-stats {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
 .queue-item.complete .queue-item__detail {
   color: var(--white);
   display: flex;
