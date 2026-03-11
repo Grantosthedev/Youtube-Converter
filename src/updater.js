@@ -1,6 +1,6 @@
 const https = require('https');
 const fs = require('fs');
-const { getYtdlpPath } = require('./utils');
+const { getYtdlpPath, getUserBinDir } = require('./utils');
 
 const YTDLP_RELEASES_URL = 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest';
 const YTDLP_DOWNLOAD_BASE = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
@@ -99,7 +99,9 @@ async function getCurrentYtdlpVersion() {
 }
 
 async function updateYtdlp() {
-  const destPath = getYtdlpPath();
+  const userBinDir = getUserBinDir();
+  fs.mkdirSync(userBinDir, { recursive: true });
+  const destPath = require('path').join(userBinDir, 'yt-dlp_macos');
   const backupPath = destPath + '.backup';
 
   try {
@@ -114,9 +116,37 @@ async function updateYtdlp() {
     return { success: true, version };
   } catch (err) {
     if (fs.existsSync(backupPath)) {
-      fs.copyFileSync(backupPath, destPath);
-      fs.unlinkSync(backupPath);
+      try {
+        fs.copyFileSync(backupPath, destPath);
+        fs.unlinkSync(backupPath);
+      } catch { /* backup restore failed too */ }
     }
+    return { success: false, error: err.message };
+  }
+}
+
+async function ensureYtdlpFresh() {
+  try {
+    const current = await getCurrentYtdlpVersion();
+    if (!current) {
+      console.log('[updater] yt-dlp version unknown, attempting update...');
+      return await updateYtdlp();
+    }
+
+    const latest = await getLatestYtdlpVersion();
+    if (!latest) return { success: true, version: current, skipped: true };
+
+    const currentClean = current.replace(/[^0-9.]/g, '');
+    const latestClean = latest.replace(/[^0-9.]/g, '');
+
+    if (isNewerVersion(latestClean, currentClean)) {
+      console.log(`[updater] yt-dlp outdated (${current} → ${latest}), updating...`);
+      return await updateYtdlp();
+    }
+
+    return { success: true, version: current, skipped: true };
+  } catch (err) {
+    console.error('[updater] auto-update check failed:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -154,5 +184,6 @@ module.exports = {
   getLatestYtdlpVersion,
   getCurrentYtdlpVersion,
   updateYtdlp,
+  ensureYtdlpFresh,
   checkAppUpdate,
 };

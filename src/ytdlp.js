@@ -9,12 +9,19 @@ const ERROR_MAP = [
   { pattern: /not available in your country/i, message: 'This video is not available in your region.' },
   { pattern: /login.*page|locked behind/i, message: 'This content requires login. Try updating yt-dlp, or the content may be private.' },
   { pattern: /Unsupported URL/i, message: 'This URL type isn\'t supported yet. DL Buddy handles videos and audio -- image-only posts aren\'t supported via this method.' },
-  { pattern: /unable to extract/i, message: 'Couldn\'t extract content. The post may be private, deleted, or require login.' },
+  { pattern: /unable to extract/i, message: 'Couldn\'t extract content. The post may be private, deleted, or require login. Try updating yt-dlp in Settings.' },
   { pattern: /HTTP Error 429/i, message: 'Rate-limiting detected. Wait a minute and try again.' },
   { pattern: /HTTP Error 403|Forbidden/i, message: 'Access denied. The platform is rate-limiting requests. Wait a moment and try again.' },
-  { pattern: /urlopen error|timed out|network/i, message: 'Network error. Check your internet connection and try again.' },
+  { pattern: /urlopen error|timed out|(?:network|connection).*(?:error|refused|reset)/i, message: 'Network error. Check your internet connection and try again.' },
   { pattern: /video.*(?:unavailable|removed|deleted|not exist)/i, message: 'This video is unavailable or has been removed.' },
   { pattern: /is not a valid URL|no video/i, message: 'Please enter a valid URL.' },
+  { pattern: /nsig extraction|signature extraction|player.*error|cipher/i, message: 'yt-dlp is outdated and can\'t decrypt this video. Hit "Update" in Settings to fix it.' },
+  { pattern: /ExtractorError|extractor.*error/i, message: 'yt-dlp can\'t process this URL. Try updating yt-dlp in Settings.' },
+  { pattern: /certificate verify failed|SSL/i, message: 'SSL certificate error. Check your network or try disabling VPN/proxy.' },
+  { pattern: /Incomplete data|incomplete read/i, message: 'Download was interrupted. Check your connection and try again.' },
+  { pattern: /content.*not available|currently unavailable/i, message: 'This content is currently unavailable on the platform.' },
+  { pattern: /unable to download webpage/i, message: 'Couldn\'t reach the platform. Check your internet or try updating yt-dlp in Settings.' },
+  { pattern: /Got error.*Traceback|ModuleNotFoundError|ImportError/i, message: 'yt-dlp binary is corrupted or incompatible. Try updating yt-dlp in Settings.' },
 ];
 
 function mapError(stderr) {
@@ -23,7 +30,16 @@ function mapError(stderr) {
   }
   const errorLine = stderr.split('\n').find(l => l.includes('ERROR:'));
   if (errorLine) return errorLine.replace('ERROR: ', '').trim();
-  return 'An unexpected error occurred. Please try again.';
+
+  if (stderr.trim()) {
+    console.error('[yt-dlp] raw stderr:', stderr.trim().slice(-500));
+    const lastMeaningful = stderr.trim().split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 150);
+    if (lastMeaningful) {
+      return `yt-dlp error: ${lastMeaningful}. Try updating yt-dlp in Settings.`;
+    }
+  }
+
+  return 'An unexpected error occurred. Try updating yt-dlp in Settings, or check your connection.';
 }
 
 function fetchVideoInfo(url, platform) {

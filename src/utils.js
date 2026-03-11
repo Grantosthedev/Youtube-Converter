@@ -59,8 +59,18 @@ function getResourcePath(...segments) {
   return path.join(__dirname, '..', ...segments);
 }
 
+function getUserBinDir() {
+  return path.join(app.getPath('userData'), 'bin');
+}
+
 function getYtdlpPath() {
-  return getResourcePath('bin', 'yt-dlp_macos');
+  const userPath = path.join(getUserBinDir(), 'yt-dlp_macos');
+  try {
+    fs.accessSync(userPath, fs.constants.X_OK);
+    return userPath;
+  } catch {
+    return getResourcePath('bin', 'yt-dlp_macos');
+  }
 }
 
 function getFfmpegPath() {
@@ -121,6 +131,7 @@ module.exports = {
   normalizeYouTubeURL,
   sanitizeFilename,
   getYtdlpPath,
+  getUserBinDir,
   getFfmpegPath,
   getResourcePath,
   binaryExists,

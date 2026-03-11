@@ -27,13 +27,10 @@ module.exports = {
       /\.js\.map$/,
       /\/CHANGELOG(\.md)?$/i,
     ],
-    osxSign: {
-      identity: 'Apple Distribution'
-    },
-    osxNotarize: {
-      appleId: process.env.APPLE_ID,
-      appleIdPassword: process.env.APPLE_ID_PASSWORD
-    }
+    osxSign: {},
+    // osxNotarize: {
+    //   keychainProfile: 'DLBuddy'
+    // }
   },
   rebuildConfig: {},
   makers: [

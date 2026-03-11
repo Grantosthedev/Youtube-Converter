@@ -49,4 +49,9 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('window-focus', listener);
     return () => ipcRenderer.removeListener('window-focus', listener);
   },
+  onYtdlpUpdated: (callback) => {
+    const listener = (_event, version) => callback(version);
+    ipcRenderer.on('ytdlp-updated', listener);
+    return () => ipcRenderer.removeListener('ytdlp-updated', listener);
+  },
 });

@@ -1379,6 +1379,10 @@ window.api.onDownloadCancelled((data) => {
    Clipboard Auto-Detect (guarded by autoPaste setting)
    ============================================================ */
 
+window.api.onYtdlpUpdated((version) => {
+  showStatus('success', `yt-dlp auto-updated to ${version}. You're good to go!`);
+});
+
 window.api.onWindowFocus(async () => {
   if (!state.autoPaste) return;
   if (state.isFetchingInfo) return;
