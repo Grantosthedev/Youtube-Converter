@@ -273,7 +273,15 @@ ipcMain.handle('start-download', async (event, options) => {
       }
     },
     (filePath) => {
+      const wasCancelledLate = activeDownloads.get(downloadId)?.cancelled;
       activeDownloads.delete(downloadId);
+
+      if (wasCancelledLate) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('download-cancelled', { id: downloadId });
+        }
+        return;
+      }
 
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('download-complete', { id: downloadId, filePath });
@@ -534,18 +542,21 @@ ipcMain.handle('download-image', async (_event, options) => {
 });
 
 ipcMain.handle('cancel-download', async (_event, downloadId) => {
+  function killEntry(entry) {
+    entry.cancelled = true;
+    entry.process.kill('SIGTERM');
+    setTimeout(() => { try { entry.process.kill('SIGKILL'); } catch {} }, 3000);
+  }
   if (downloadId) {
     const entry = activeDownloads.get(downloadId);
     if (entry) {
-      entry.cancelled = true;
-      entry.process.kill('SIGTERM');
+      killEntry(entry);
       return { cancelled: true };
     }
     return { cancelled: false };
   }
   for (const [, entry] of activeDownloads) {
-    entry.cancelled = true;
-    entry.process.kill('SIGTERM');
+    killEntry(entry);
   }
   return { cancelled: true };
 });

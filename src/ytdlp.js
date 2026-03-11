@@ -172,13 +172,13 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
     if (quality === 'hd') {
       args.push(
         '-f',
-        'bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080]+bestaudio',
+        'bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio',
         '--merge-output-format', 'mp4',
       );
     } else {
       args.push(
         '-f',
-        'bestvideo[height>=2160]+bestaudio/bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best',
+        'bestvideo[height>=2160]+bestaudio/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio/best',
         '--merge-output-format', 'mp4',
       );
     }
@@ -263,11 +263,16 @@ function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
       return;
     }
 
-    const probe = spawn(ffmpegPath, ['-i', filePath], { timeout: 10000 });
+    const probe = spawn(ffmpegPath, ['-i', filePath]);
     let probeOutput = '';
     probe.stderr.on('data', (d) => { probeOutput += d.toString(); });
 
+    const probeTimer = setTimeout(() => {
+      try { probe.kill('SIGKILL'); } catch {}
+    }, 10000);
+
     probe.on('close', () => {
+      clearTimeout(probeTimer);
       const hasNonCompatible = /Video:.*(?:vp[89]|av01|av1)/i.test(probeOutput);
       const hasCompatible = /Video:.*(?:h264|avc|hevc|h265)/i.test(probeOutput);
 
@@ -314,7 +319,10 @@ function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
       });
     });
 
-    probe.on('error', () => resolve(filePath));
+    probe.on('error', () => {
+      clearTimeout(probeTimer);
+      resolve(filePath);
+    });
   });
 }
 
