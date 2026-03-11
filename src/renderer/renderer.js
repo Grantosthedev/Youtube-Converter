@@ -103,6 +103,7 @@ const historyProjectMenu = $('#historyProjectMenu');
 const helpBtn = $('#helpBtn');
 const helpPopover = $('#helpPopover');
 const activityToast = $('#activityToast');
+const activitySpinner = document.querySelector('.activity-toast__spinner');
 const activityText = $('#activityText');
 
 /* ============================================================
@@ -189,6 +190,11 @@ function truncatePath(p) {
   const parts = home.split('/');
   if (parts.length <= 3) return home;
   return parts[0] + '/…/' + parts.slice(-2).join('/');
+}
+
+function icon(name, extraClass = '') {
+  const classes = `hgi-stroke hgi-${name}${extraClass ? ` ${extraClass}` : ''}`;
+  return `<i class="${classes}" aria-hidden="true"></i>`;
 }
 
 /* ============================================================
@@ -422,7 +428,7 @@ function addDownloadToQueue(id, title, quality) {
   el.innerHTML = `
     <div class="queue-item__row">
       <span class="queue-item__title">${escapeHtml(title)}</span>
-      <button class="queue-item__action" aria-label="Cancel">✕</button>
+      <button class="queue-item__action" aria-label="Cancel">${icon('cancel-01', 'ui-icon')}</button>
     </div>
     <div class="queue-item__bar">
       <div class="queue-item__fill downloading"></div>
@@ -473,8 +479,7 @@ function updateQueueItem(id) {
     case 'complete': {
       fill.className = 'queue-item__fill complete';
       fill.style.width = '100%';
-      const svg = '<svg class="check-icon" viewBox="0 0 12 12"><circle cx="6" cy="6" r="6"/><path d="M3.5 6.5l2 2 3-4"/></svg>';
-      detail.innerHTML = svg + t('Done, you lucky bastard');
+      detail.innerHTML = icon('checkmark-circle-02', 'ui-icon') + t('Done, you lucky bastard');
       if (!el.querySelector('.queue-item__show-file')) {
         const btn = document.createElement('button');
         btn.className = 'queue-item__show-file';
@@ -711,9 +716,14 @@ let statusHideTimer = null;
 
 function showStatus(type, message) {
   clearTimeout(statusHideTimer);
-  const icons = { error: '✕', success: '✓', warning: '⚠', info: 'ℹ' };
+  const icons = {
+    error: icon('cancel-01', 'ui-icon'),
+    success: icon('checkmark-circle-02', 'ui-icon'),
+    warning: icon('alert-circle', 'ui-icon'),
+    info: '',
+  };
   statusMessage.className = `status-message ${type}`;
-  statusIcon.textContent = icons[type] || '';
+  statusIcon.innerHTML = icons[type] || '';
   statusText.textContent = message;
   if (type === 'error') {
     statusCopy.style.display = '';
@@ -758,7 +768,7 @@ statusCopy.addEventListener('click', async () => {
     document.body.removeChild(ta);
   }
   const origHTML = statusCopy.innerHTML;
-  statusCopy.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+  statusCopy.innerHTML = icon('checkmark-circle-02', 'ui-icon ui-icon--action');
   setTimeout(() => { statusCopy.innerHTML = origHTML; }, 1500);
 });
 
@@ -768,9 +778,15 @@ statusCopy.addEventListener('click', async () => {
 
 let activityHideTimer = null;
 
+function setActivitySpinnerIcon(name) {
+  if (!activitySpinner) return;
+  activitySpinner.className = `activity-toast__spinner hgi-stroke hgi-${name} ui-icon`;
+}
+
 function showActivityToast(message) {
   clearTimeout(activityHideTimer);
   activityText.textContent = message;
+  setActivitySpinnerIcon('loading-02');
   activityToast.classList.remove('done');
   activityToast.classList.add('visible');
   activityHideTimer = setTimeout(() => hideActivityToast(), 15000);
@@ -779,6 +795,7 @@ function showActivityToast(message) {
 function completeActivityToast(message, duration = 2500) {
   if (!activityToast.classList.contains('visible')) return;
   activityText.textContent = message;
+  setActivitySpinnerIcon('checkmark-circle-02');
   activityToast.classList.add('done');
   activityHideTimer = setTimeout(() => hideActivityToast(), duration);
 }
@@ -1203,7 +1220,7 @@ function appendCarouselThumb(item, i, selected = false) {
   thumb.className = `carousel-thumb loading${selected ? ' selected' : ''}`;
   thumb.dataset.index = i;
   thumb.innerHTML = `
-    <span class="carousel-thumb__check">✓</span>
+    <span class="carousel-thumb__check">${icon('checkmark-circle-02', 'ui-icon ui-icon--sm')}</span>
     <span class="carousel-thumb__type">${item.type === 'video' ? 'VID' : 'IMG'}</span>
   `;
 
@@ -1296,7 +1313,7 @@ async function handleCarouselDownload() {
   el.innerHTML = `
     <div class="queue-item__row">
       <span class="queue-item__title">${escapeHtml(title)}</span>
-      <button class="queue-item__action" aria-label="Cancel">✕</button>
+      <button class="queue-item__action" aria-label="Cancel">${icon('cancel-01', 'ui-icon')}</button>
     </div>
     <div class="queue-item__bar">
       <div class="queue-item__fill downloading" style="width: 0%"></div>
@@ -1390,8 +1407,7 @@ async function handleCarouselDownload() {
     const detail = el.querySelector('.queue-item__detail');
     const fill = el.querySelector('.queue-item__fill');
     if (fill) { fill.className = 'queue-item__fill complete'; fill.style.width = '100%'; }
-    const svg = '<svg class="check-icon" viewBox="0 0 12 12"><circle cx="6" cy="6" r="6"/><path d="M3.5 6.5l2 2 3-4"/></svg>';
-    if (detail) detail.innerHTML = svg + `${downloadedCount} of ${total} saved${errorCount > 0 ? ` (${errorCount} failed)` : ''}`;
+    if (detail) detail.innerHTML = icon('checkmark-circle-02', 'ui-icon') + `${downloadedCount} of ${total} saved${errorCount > 0 ? ` (${errorCount} failed)` : ''}`;
     el.className = 'queue-item complete';
 
     if (filePaths.length > 0 && !el.querySelector('.queue-item__show-file')) {
@@ -1904,7 +1920,7 @@ function renderProjectList(filter) {
 
   const exactMatch = term && state.projects.some(p => p.toLowerCase() === term);
   if (term && !exactMatch) {
-    projectHint.textContent = `↵ Enter to create "${filter}"`;
+    projectHint.textContent = `Press Enter to create "${filter}"`;
     projectHint.style.display = '';
   } else {
     projectHint.style.display = 'none';
@@ -2220,9 +2236,11 @@ function updateHistoryProjectFilter() {
   }
   historyProjectFilter.style.display = '';
 
-  historyProjectBtn.textContent = state.historyProjectFilter
-    ? `${state.historyProjectFilter} ▾`
-    : 'All Projects ▾';
+  const projectFilterLabel = state.historyProjectFilter || 'All Projects';
+  historyProjectBtn.innerHTML = `
+    <span class="history-project-filter-btn__label">${escapeHtml(projectFilterLabel)}</span>
+    ${icon('arrow-down-01', 'ui-icon history-project-filter-btn__icon')}
+  `;
   historyProjectBtn.classList.toggle('active', !!state.historyProjectFilter);
 
   historyProjectMenu.innerHTML = '';
@@ -2373,9 +2391,7 @@ function createHistoryEntryEl(entry) {
       ${entry.project ? `<span class="history-entry__project">${escapeHtml(entry.project)}</span>` : ''}
       <span class="history-entry__date">${escapeHtml(formatRelativeDate(entry.downloadedAt))}</span>
       <span class="history-entry__chevron">
-        <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
-          <path d="M7.5 5l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        ${icon('arrow-right-01', 'ui-icon')}
       </span>
     </div>
     <div class="history-entry__detail">

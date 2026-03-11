@@ -1,15 +1,72 @@
 /* ============================================================
-   Design System — Flat Dark Red
-   Colors: #490504 (dark), #E20000 (bright), #A1A1A1 (muted)
-   Background: transparent (macOS vibrancy)
-   Font: Montserrat Alternates Bold
-   Animations: spring easing, scale/position/stroke transforms,
-               one-shot shimmers — no glows, no blurs
+   DL BUDDY — Design System
+   ──────────────────────────────────────────────────────────
+   COLOUR PALETTE
+     Red (primary)
+       --red-dark:      #490504   bg fills, pill backgrounds
+       --red-bright:    #E20000   accents, active states, buttons
+     Yellow (activity / background state)
+       --yellow-dark:   #2E2200   activity toast background
+       --yellow-bright: #E8A800   activity toast text & spinner
+     Neutral
+       --grey-muted:    #A1A1A1   placeholder, secondary text
+       --white:         #FFFFFF   primary text
+     Semantic
+       --color-error:   #FF453A   error states & toasts
+       --color-success: #30D158   success states, has-value ring
+       --color-warning: #FFD60A   warning toasts
+       --color-info:    #FFFFFF   info toasts (no icon)
+
+   TYPOGRAPHY
+     Font:    Ligconsolata Bold (monospace w/ ligatures, SIL OFL)
+     Base:    14px / 700
+     Scale:   11px meta · 12px chips/badges · 13px secondary
+              14px body/buttons · 15px time inputs · 18px headings
+
+   ICONOGRAPHY
+     Provider: Hugeicons only (rounded stroke set via hgi-stroke)
+     Rule: Never use emoji, unicode symbols, or inline SVG for UI icons
+     Pattern: use `icon(name)` in JS and `.ui-icon` utility classes in HTML/CSS
+
+   BORDER RADIUS
+     --radius-pill: 45px   URL bar, buttons, time inputs, quality bar
+     --radius-card: 18px   video card, carousel card, toasts
+     --radius-sm:   10px   queue items, small cards
+
+   SPACING
+     --gap: 12px            standard gap between stacked elements
+     URL/controls width:    92%, max 900px, min 420px (centred)
+
+   ANIMATION
+     --spring: cubic-bezier(0.32, 1.05, 0.36, 1)   bouncy entrances
+     --ease:   cubic-bezier(0.32, 0.72, 0, 1)       smooth exits
+     Principles: scale · translate · opacity · box-shadow
+                 no glow, no blur, no gradients on interactive elements
+
+   STICKER SYSTEM
+     /stickers/Default.avif   idle / default state
+     /stickers/goodN.*        random pick on success outcomes
+     /stickers/badN.*         random pick on error / warning outcomes
+     /stickers/empty-queue.png  queue panel empty state
+     Swap animation: scale(0.82)→scale(1) + opacity fade, 150ms out / 350ms in
+     Reset: on URL clear → default; stays otherwise until next state change
+
+   KEY COMPONENTS
+     URL Row       white 2px border pill, max 900px, centred
+     Download btn  red pill inside URL row, 10px inset margin, 38px tall
+     Time inputs   dark-red pill, inset box-shadow ring (green=has value,
+                   red=error, red-bright=focus), 112×48px
+     Quality bar   dark-red pill, sliding red pill indicator, max 500px
+     Activity toast  yellow-dark bg, yellow-bright text, bottom-centre
+     Status toast    dark-red bg, coloured text, max 520px, wraps, copy btn on errors
+     Sticker         220×220px above URL bar, object-fit:contain, pop animation
    ============================================================ */
 
 :root {
-  --red-dark:    #490504;
-  --red-bright:  #E20000;
+  --red-dark:     #490504;
+  --red-bright:   #E20000;
+  --yellow-dark:  #2E2200;
+  --yellow-bright: #E8A800;
   --grey-muted:  #A1A1A1;
   --white:       #FFFFFF;
 
@@ -73,6 +130,19 @@ input, button {
   background: none;
 }
 
+.ui-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.ui-icon--button { font-size: 18px; }
+.ui-icon--help { font-size: 16px; }
+.ui-icon--action { font-size: 12px; }
+.ui-icon--sm { font-size: 15px; }
+.ui-icon--xs { font-size: 13px; }
+
 /* ============================================================
    App Shell
    ============================================================ */
@@ -134,7 +204,7 @@ input, button {
   transform: scale(0.95);
 }
 
-.queue-btn.nudge svg {
+.queue-btn.nudge .ui-icon {
   animation: arrowNudge 400ms var(--spring);
 }
 
@@ -406,26 +476,9 @@ input, button {
   content: none;
 }
 
-.check-icon {
-  width: 12px;
-  height: 12px;
-  min-width: 12px;
-  flex-shrink: 0;
-}
-
-.check-icon circle {
-  fill: var(--color-success);
-}
-
-.check-icon path {
-  fill: none;
-  stroke: #FFFFFF;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-dasharray: 12;
-  stroke-dashoffset: 12;
-  animation: drawCheck 400ms var(--ease) forwards;
+.queue-item.complete .queue-item__detail .ui-icon {
+  color: var(--color-success);
+  font-size: 12px;
 }
 
 .queue-item.error .queue-item__detail {
@@ -711,7 +764,8 @@ input, button {
 }
 
 .url-hint.clipboard::before {
-  content: '✓';
+  content: '\f15ad';
+  font-family: 'hugeicons-stroke-rounded' !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1126,9 +1180,9 @@ input, button {
   gap: 8px;
   padding: 10px 16px;
   border-radius: 18px;
-  background: #000;
+  background: var(--yellow-dark);
   font-size: 12px;
-  color: var(--grey-muted);
+  color: var(--yellow-bright);
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(8px);
@@ -1149,20 +1203,14 @@ input, button {
 }
 
 .activity-toast__spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--grey-muted);
-  border-top-color: transparent;
-  border-radius: 50%;
+  font-size: 14px;
+  color: var(--yellow-bright);
   animation: activity-spin 700ms linear infinite;
   flex-shrink: 0;
 }
 
 .activity-toast.done .activity-toast__spinner {
-  border: none;
-  width: 12px;
-  height: 12px;
-  background: var(--color-success);
+  color: var(--color-success);
   animation: none;
 }
 
@@ -1225,11 +1273,11 @@ input, button {
   transform: scale(0.95);
 }
 
-.settings-btn svg {
+.settings-btn .ui-icon {
   transition: transform 350ms var(--spring);
 }
 
-.settings-anchor.open .settings-btn svg {
+.settings-anchor.open .settings-btn .ui-icon {
   transform: rotate(90deg);
 }
 
@@ -1504,16 +1552,6 @@ input, button {
   margin-top: 0;
 }
 
-.status-message.success .status-message__icon {
-  width: 18px;
-  height: 18px;
-  background: var(--color-success);
-  border-radius: 50%;
-  color: #FFFFFF;
-  font-size: 10px;
-  font-weight: 700;
-}
-
 .status-message__icon {
   margin-top: 1px;
 }
@@ -1551,14 +1589,8 @@ input, button {
   transform: scale(0.94);
 }
 
-.status-action-btn svg {
-  width: 12px;
-  height: 12px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.status-action-btn .ui-icon {
+  font-size: 12px;
 }
 
 /* ============================================================
@@ -2401,7 +2433,14 @@ input, button {
 }
 
 .history-project-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   white-space: nowrap;
+}
+
+.history-project-filter-btn__icon {
+  font-size: 12px;
 }
 
 .history-project-menu {
