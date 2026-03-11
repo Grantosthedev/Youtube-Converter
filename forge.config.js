@@ -9,6 +9,7 @@ module.exports = {
       unpack: '**/node_modules/ffmpeg-static/**',
     },
     name: 'DL Buddy',
+    appBundleId: 'com.grantosthedev.dlbuddy',
     icon: path.join(__dirname, 'assets', 'icon'),
     extraResource: [
       path.join(__dirname, 'bin'),

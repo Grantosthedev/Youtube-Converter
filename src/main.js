@@ -1,12 +1,33 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Notification, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const Store = require('electron-store');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos } = require('./ytdlp');
 const { updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, ensureYtdlpFresh } = require('./updater');
-const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getFfmpegPath, pathExists, checkDiskSpace } = require('./utils');
+const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri } = require('./media-fetcher');
+
+const GOOD_STICKERS = [
+  'good14.png', 'good23.png', 'good24.png', 'good25.png', 'good26.png',
+  'good27.png', 'good28.png', 'good29.png', 'good30.png', 'good31.png',
+  'good32.png', 'good33.png',
+];
+const BAD_STICKERS = [
+  'bad11.png', 'bad12.png', 'bad13.png', 'bad14.png',
+  'bad15.png', 'bad16.png', 'bad17.png', 'bad18.png',
+];
+
+function getStickerIcon(type) {
+  const pool = type === 'bad' ? BAD_STICKERS : GOOD_STICKERS;
+  const name = pool[Math.floor(Math.random() * pool.length)];
+  try {
+    const buf = fs.readFileSync(path.join(__dirname, 'renderer', 'stickers', name));
+    return nativeImage.createFromBuffer(buf);
+  } catch {
+    return null;
+  }
+}
 
 const store = new Store({
   defaults: {
@@ -14,15 +35,24 @@ const store = new Store({
     quality: 'best',
     autoPaste: true,
     showInFinder: false,
+    mode: 'unhinged',
     windowBounds: { width: 880, height: 640 },
     downloadHistory: [],
+    projects: [],
+    activeProject: null,
+    lastYtdlpCheck: 0,
   },
 });
+
+function nt(unhinged, professional) {
+  return store.get('mode') === 'professional' ? professional : unhinged;
+}
 
 const videoInfoCache = new Map();
 
 let mainWindow = null;
 const activeDownloads = new Map();
+let ytdlpUpdatePromise = null;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -110,6 +140,9 @@ function createWindow() {
 // --- IPC Handlers ---
 
 ipcMain.handle('fetch-video-info', async (_event, url) => {
+  if (ytdlpUpdatePromise) {
+    await Promise.race([ytdlpUpdatePromise, new Promise(r => setTimeout(r, 1500))]);
+  }
   if (!isValidURL(url)) {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
@@ -134,6 +167,9 @@ const VALID_QUALITIES = new Set(['best', 'hd', 'audio']);
 const TIME_FORMAT = /^\d{2}:\d{2}:\d{2}$/;
 
 ipcMain.handle('start-download', async (event, options) => {
+  if (ytdlpUpdatePromise) {
+    await Promise.race([ytdlpUpdatePromise, new Promise(r => setTimeout(r, 1500))]);
+  }
   if (!options || typeof options !== 'object') {
     throw new Error('Invalid download options, you inept noodle.');
   }
@@ -151,7 +187,9 @@ ipcMain.handle('start-download', async (event, options) => {
   }
 
   const platform = detectPlatform(options.url);
-  const downloadPath = options.outputPath || store.get('downloadPath');
+  const basePath = options.outputPath || store.get('downloadPath');
+  const activeProject = store.get('activeProject');
+  const downloadPath = activeProject ? path.join(basePath, activeProject) : basePath;
 
   if (!pathExists(downloadPath)) {
     try {
@@ -230,6 +268,7 @@ ipcMain.handle('start-download', async (event, options) => {
           downloadedAt: new Date().toISOString(),
           platform: cachedInfo.platform || platform || 'youtube',
           mediaType: cachedInfo.mediaType || 'video',
+          project: activeProject || null,
         };
 
         const history = store.get('downloadHistory');
@@ -239,9 +278,10 @@ ipcMain.handle('start-download', async (event, options) => {
 
         if (Notification.isSupported()) {
           const notif = new Notification({
-            title: 'Done, You Lucky Mother Fucka!',
-            body: cachedInfo.title || path.basename(filePath || 'Video saved somehow, lol'),
+            title: nt('WTF it actually worked, download complete', 'Download complete'),
+            body: cachedInfo.title || path.basename(filePath || nt('Video saved somehow, lol', 'Video saved')),
             silent: false,
+            icon: getStickerIcon('good'),
             actions: [{ type: 'button', text: 'Show File' }],
           });
           notif.on('click', () => {
@@ -285,9 +325,10 @@ ipcMain.handle('start-download', async (event, options) => {
 
       if (Notification.isSupported()) {
         const notif = new Notification({
-          title: 'What the Helly! Download Failed',
-          body: errorMsg || 'idk how to tell you but... Something went wrong.',
+          title: nt('What the Helly! Download Failed', 'Download failed'),
+          body: errorMsg || nt('idk how to tell you but... Something went wrong.', 'Something went wrong.'),
           silent: false,
+          icon: getStickerIcon('bad'),
         });
         notif.on('click', () => {
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -309,6 +350,7 @@ ipcMain.handle('fetch-media-info', async (_event, url) => {
 });
 
 ipcMain.handle('fetch-carousel-videos', async (_event, url) => {
+  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
   return await fetchCarouselVideos(url);
 });
 
@@ -317,7 +359,9 @@ ipcMain.handle('proxy-image', async (_event, url) => {
 });
 
 ipcMain.handle('download-image', async (_event, options) => {
-  const downloadPath = options.outputPath || store.get('downloadPath');
+  const imageBasePath = options.outputPath || store.get('downloadPath');
+  const imageActiveProject = store.get('activeProject');
+  const downloadPath = imageActiveProject ? path.join(imageBasePath, imageActiveProject) : imageBasePath;
 
   if (!pathExists(downloadPath)) {
     try {
@@ -387,6 +431,7 @@ ipcMain.handle('download-image', async (_event, options) => {
         platform: 'instagram',
         mediaType: 'carousel',
         carouselItems: [childItem],
+        project: imageActiveProject || null,
       };
       history.unshift(parentEntry);
     }
@@ -394,9 +439,14 @@ ipcMain.handle('download-image', async (_event, options) => {
     if (Notification.isSupported()) {
       const isVideo = options.mediaType === 'video';
       const notif = new Notification({
-        title: isVideo ? 'Reel downloaded, you legend' : 'you downloaded an image, well fucking done',
-        body: options.title || options.filename || (isVideo ? 'Reel saved, fam' : 'Image saved, fam'),
+        title: isVideo
+          ? nt('Reel downloaded, you legend', 'Reel downloaded')
+          : nt('you downloaded an image, well fucking done', 'Image downloaded'),
+        body: options.title || options.filename || (isVideo
+          ? nt('Reel saved, fam', 'Reel saved')
+          : nt('Image saved, fam', 'Image saved')),
         silent: false,
+        icon: getStickerIcon('good'),
       });
       notif.on('click', () => {
         if (result.filePath) shell.showItemInFolder(result.filePath);
@@ -429,6 +479,7 @@ ipcMain.handle('download-image', async (_event, options) => {
       downloadedAt: new Date().toISOString(),
       platform: 'instagram',
       mediaType: options.mediaType || 'image',
+      project: imageActiveProject || null,
     };
     history.unshift(historyEntry);
   }
@@ -492,10 +543,13 @@ ipcMain.handle('get-settings', async () => {
     quality: store.get('quality'),
     autoPaste: store.get('autoPaste'),
     showInFinder: store.get('showInFinder'),
+    mode: store.get('mode'),
+    activeProject: store.get('activeProject'),
+    projects: store.get('projects'),
   };
 });
 
-const ALLOWED_SETTINGS = new Set(['quality', 'autoPaste', 'downloadPath', 'showInFinder']);
+const ALLOWED_SETTINGS = new Set(['quality', 'autoPaste', 'downloadPath', 'showInFinder', 'mode']);
 
 ipcMain.handle('set-setting', async (_event, key, value) => {
   if (!ALLOWED_SETTINGS.has(key)) return;
@@ -515,12 +569,17 @@ ipcMain.handle('check-app-update', async () => {
   return await checkAppUpdate(currentVersion);
 });
 
-ipcMain.handle('show-notification', async (_event, title, body, filePath) => {
+ipcMain.handle('show-notification', async (_event, title, body, filePath, stickerType = 'good') => {
   if (Notification.isSupported()) {
-    const notif = new Notification({ title, body, silent: false });
+    const notifOptions = { title, body, silent: false, icon: getStickerIcon(stickerType) };
+    if (filePath) notifOptions.actions = [{ type: 'button', text: 'Show File' }];
+    const notif = new Notification(notifOptions);
     notif.on('click', () => {
       if (filePath) shell.showItemInFolder(filePath);
       else if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
+    });
+    notif.on('action', () => {
+      if (filePath) shell.showItemInFolder(filePath);
     });
     notif.show();
   }
@@ -549,6 +608,29 @@ ipcMain.handle('cleanup-partial-files', async (_event, dir) => {
   } catch { /* ignore cleanup errors */ }
 });
 
+ipcMain.handle('get-projects', async () => {
+  return store.get('projects');
+});
+
+ipcMain.handle('get-active-project', async () => {
+  return store.get('activeProject');
+});
+
+ipcMain.handle('set-active-project', async (_event, projectName) => {
+  if (projectName && typeof projectName === 'string') {
+    const sanitized = sanitizeFilename(projectName).substring(0, 50);
+    if (!sanitized) return null;
+    store.set('activeProject', sanitized);
+    const projects = store.get('projects');
+    const filtered = projects.filter(p => p !== sanitized);
+    filtered.unshift(sanitized);
+    store.set('projects', filtered);
+    return sanitized;
+  }
+  store.set('activeProject', null);
+  return null;
+});
+
 ipcMain.handle('get-history', async () => {
   return store.get('downloadHistory');
 });
@@ -571,6 +653,8 @@ ipcMain.handle('open-external', async (_event, url) => {
 // --- App lifecycle ---
 
 app.on('ready', () => {
+  app.setName('DL Buddy');
+
   const ytdlpOk = binaryExists(getYtdlpPath());
   if (!ytdlpOk) {
     dialog.showErrorBox(
@@ -582,14 +666,39 @@ app.on('ready', () => {
   }
   createWindow();
 
-  ensureYtdlpFresh().then((result) => {
+  const sendActivity = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('background-activity', data);
+    }
+  };
+
+  let activityNotified = false;
+  let pendingActivityResult = null;
+
+  ytdlpUpdatePromise = ensureYtdlpFresh(store).then((result) => {
     if (result && result.success && !result.skipped) {
       console.log(`[startup] yt-dlp auto-updated to ${result.version}`);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('ytdlp-updated', result.version);
       }
+      pendingActivityResult = { type: 'ytdlp-check', status: 'updated' };
+    } else {
+      pendingActivityResult = { type: 'ytdlp-check', status: 'up-to-date' };
     }
-  }).catch(() => { /* non-blocking, don't crash on startup */ });
+    if (activityNotified) sendActivity(pendingActivityResult);
+  }).catch(() => {
+    pendingActivityResult = { type: 'ytdlp-check', status: 'failed' };
+    if (activityNotified) sendActivity(pendingActivityResult);
+  }).finally(() => {
+    ytdlpUpdatePromise = null;
+  });
+
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (!pendingActivityResult) {
+      activityNotified = true;
+      sendActivity({ type: 'ytdlp-check', status: 'checking' });
+    }
+  });
 });
 
 app.on('window-all-closed', () => {

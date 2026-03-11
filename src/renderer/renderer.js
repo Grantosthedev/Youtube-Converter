@@ -21,6 +21,12 @@ const state = {
   historySearchTerm: '',
   carouselData: null,
   carouselSelected: new Set(),
+  mode: 'unhinged',
+  activeProject: null,
+  projects: [],
+  projectDropdownOpen: false,
+  historyProjectFilter: null,
+  helpOpen: false,
 };
 
 /* ============================================================
@@ -52,6 +58,7 @@ const settingsPopover = $('#settingsPopover');
 const settingsBackdrop = $('#settingsBackdrop');
 const autoPasteToggle = $('#autoPasteToggle');
 const showInFinderToggle = $('#showInFinderToggle');
+const modeToggle = $('#modeToggle');
 const updateYtdlpBtn = $('#updateYtdlpBtn');
 const appVersion = $('#appVersion');
 const appUpdateBtn = $('#appUpdateBtn');
@@ -79,6 +86,24 @@ const carouselCount = $('#carouselCount');
 const statusRetry = $('#statusRetry');
 const statusCopy = $('#statusCopy');
 const btnHint = $('#btnHint');
+const projectBtn = $('#projectBtn');
+const projectPill = $('#projectPill');
+const projectPillName = $('#projectPillName');
+const projectPillClear = $('#projectPillClear');
+const projectDropdown = $('#projectDropdown');
+const projectInput = $('#projectInput');
+const projectList = $('#projectList');
+const projectEmpty = $('#projectEmpty');
+const projectHint = $('#projectHint');
+const projectBackdrop = $('#projectBackdrop');
+const pathRow = document.querySelector('.path-row');
+const historyProjectFilter = $('#historyProjectFilter');
+const historyProjectBtn = $('#historyProjectBtn');
+const historyProjectMenu = $('#historyProjectMenu');
+const helpBtn = $('#helpBtn');
+const helpPopover = $('#helpPopover');
+const activityToast = $('#activityToast');
+const activityText = $('#activityText');
 
 /* ============================================================
    Helpers
@@ -128,6 +153,30 @@ function parseTimeToSeconds(timeStr) {
   return parts[0] || 0;
 }
 
+function extractYouTubeTimestamp(url) {
+  try {
+    const urlObj = new URL(url);
+    const t = urlObj.searchParams.get('t') || urlObj.searchParams.get('start');
+    if (!t) return 0;
+    if (/^\d+$/.test(t)) return parseInt(t, 10);
+    let seconds = 0;
+    const h = t.match(/(\d+)h/);
+    const m = t.match(/(\d+)m/);
+    const s = t.match(/(\d+)s/);
+    if (h) seconds += parseInt(h[1], 10) * 3600;
+    if (m) seconds += parseInt(m[1], 10) * 60;
+    if (s) seconds += parseInt(s[1], 10);
+    return seconds;
+  } catch { return 0; }
+}
+
+function secondsToTimeString(totalSec) {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = Math.floor(totalSec % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 function shakeElement(el) {
   el.classList.add('shake');
   el.addEventListener('animationend', () => el.classList.remove('shake'), { once: true });
@@ -140,6 +189,129 @@ function truncatePath(p) {
   const parts = home.split('/');
   if (parts.length <= 3) return home;
   return parts[0] + '/…/' + parts.slice(-2).join('/');
+}
+
+/* ============================================================
+   Professional / Unhinged Mode — string translations
+   ============================================================ */
+
+const PROFESSIONAL_STRINGS = new Map([
+  ['No downloads yet fam, go and steal some videos already', 'No downloads yet. Paste a URL to get started.'],
+  ['Hurry up and paste a link, my ninja', 'Paste a video or image URL'],
+  ['Download This Shit', 'Download'],
+  ['Preparing, hold your goddamn horses...', 'Preparing download...'],
+  ['Processing clip, sit your ass down...', 'Processing clip...'],
+  ['Done, you lucky bastard', 'Download complete'],
+  ['Done, you lucky bastard!', 'Download complete!'],
+  ['Failed miserably', 'Download failed'],
+  ['Cancelled, you indecisive clown', 'Download cancelled'],
+  ['File vanished, you probably deleted it yourself. Opened the folder instead.', 'File not found. Opened the download folder.'],
+  ['Scanning the goddamn link...', 'Analyzing link...'],
+  ['Locked in. Ready to rip.', 'Ready to download.'],
+  ['Download crashed and burned, you buffoon. Try again.', 'Download failed. Please try again.'],
+  ['Failed to update download engine, what the helly!', 'Download engine update failed.'],
+  ['Clear All, champ', 'Clear All'],
+  ['No downloads yet. Go download something.', 'No download history yet.'],
+  ['Download Image', 'Download Image'],
+  ['Download Reel', 'Download Reel'],
+  ['Show File', 'Show File'],
+  ['Show Files', 'Show Files'],
+  ['Checking Instagram post...', 'Checking Instagram post...'],
+  ['Select items to download', 'Select items to download'],
+  ['Reel ready to download', 'Reel ready to download'],
+  ['Image ready to download', 'Image ready to download'],
+  ['Hold on, fetching...', 'Fetching content...'],
+  ['Hold on, fetching video info...', 'Fetching video info...'],
+  ['Paste a URL first', 'Paste a URL first'],
+  ['Paste a URL first champ', 'Please paste a URL first'],
+  ['Fix clip times (start must be before end)', 'Fix clip times (start must be before end)'],
+  ['Not ready yet', 'Not ready yet'],
+  ['TikTok photo slideshows aren\'t supported yet. Video posts work great though!', 'TikTok photo slideshows are not supported. Video posts are supported.'],
+  ['Couldn\'t fetch this Instagram post. It may be private or require login.', 'Could not fetch this Instagram post. It may be private or require login.'],
+  ['Loading...', 'Loading...'],
+  ['Newest first', 'Newest first'],
+  ['Oldest first', 'Oldest first'],
+  ['Deselect All', 'Deselect All'],
+  ['Select All', 'Select All'],
+  ['Updating…', 'Updating…'],
+  ['Update', 'Update'],
+  ['Copied!', 'Copied!'],
+  ['Copy Info', 'Copy Info'],
+  ['Copy URL', 'Copy URL'],
+  ['Drop a link here', 'Drop a link here'],
+  ['File was moved or deleted — opened download folder', 'File not found. Opened the download folder.'],
+  ['Name this project, fam', 'Enter a project name'],
+  ['Add new project', 'Add new project'],
+  ['No projects yet. Type one in, genius.', 'No projects yet. Enter a name to create one.'],
+  ['Hold tight, making sure everything works…', 'Running background checks…'],
+  ['All systems go, baby', 'Ready'],
+]);
+
+const PROFESSIONAL_TEMPLATES = {
+  ytdlpUpdated: (version) => `Download engine updated to ${version}.`,
+  ytdlpUpdateFailed: (error) => `Update failed: ${error}`,
+  maxConcurrent: (max) => `Maximum ${max} concurrent downloads reached.`,
+  nukeEntries: (count) => `Delete all ${count} entries?`,
+  carouselNotifTitle: () => 'Carousel download complete',
+  carouselPartialTitle: () => 'Carousel partially downloaded',
+  carouselFailTitle: () => 'Carousel download failed',
+  ytdlpAutoUpdated: (version) => `Download engine updated to ${version}.`,
+  clipboardDetected: (platformName) => `${platformName} link detected in clipboard`,
+  newVersionAvailable: (version) => `New version v${version} available. Check Settings.`,
+};
+
+function t(str) {
+  if (state.mode === 'professional' && PROFESSIONAL_STRINGS.has(str)) {
+    return PROFESSIONAL_STRINGS.get(str);
+  }
+  return str;
+}
+
+function tp(key, ...args) {
+  if (state.mode === 'professional' && PROFESSIONAL_TEMPLATES[key]) {
+    return PROFESSIONAL_TEMPLATES[key](...args);
+  }
+  return null;
+}
+
+function applyMode() {
+  const yaMumChip = document.getElementById('yaMumChip');
+  if (yaMumChip) yaMumChip.style.display = state.mode === 'unhinged' ? '' : 'none';
+
+  const queueEmptyText = queueEmpty.querySelector('.queue-panel__empty-text');
+  if (queueEmptyText) {
+    queueEmptyText.textContent = t('No downloads yet fam, go and steal some videos already');
+  }
+
+  urlInput.placeholder = t('Hurry up and paste a link, my ninja');
+
+  if (!state.videoInfo && !state.carouselData) {
+    downloadBtn.textContent = t('Download This Shit');
+  }
+
+  const historyEmptySpan = historyEmpty.querySelector('span');
+  if (historyEmptySpan) {
+    historyEmptySpan.textContent = t('No downloads yet. Go download something.');
+  }
+
+  if (!historyClearBtn.classList.contains('confirm')) {
+    historyClearBtn.textContent = t('Clear All, champ');
+  }
+
+  historySortBtn.textContent = state.historySortNewest ? t('Newest first') : t('Oldest first');
+
+  const dropContent = document.querySelector('.drop-overlay__content');
+  if (dropContent) {
+    dropContent.textContent = t('Drop a link here');
+  }
+
+  if (projectInput) {
+    projectInput.placeholder = t('Name this project, fam');
+  }
+
+  if (projectEmpty) {
+    projectEmpty.textContent = t('No projects yet. Type one in, genius.');
+  }
 }
 
 /* ============================================================
@@ -196,6 +368,8 @@ function openQueue() {
   queuePanel.classList.add('open');
   queueBackdrop.classList.add('visible');
   closeSettings();
+  closeProjectDropdown();
+  closeHelp();
 }
 
 function closeQueue() {
@@ -254,7 +428,7 @@ function addDownloadToQueue(id, title, quality) {
       <div class="queue-item__fill downloading"></div>
     </div>
     <div class="queue-item__row">
-      <span class="queue-item__detail">Preparing, hold your goddamn horses...</span>
+      <span class="queue-item__detail">${t('Preparing, hold your goddamn horses...')}</span>
       <span class="queue-item__quality">${escapeHtml(qualityLabel(quality))}</span>
     </div>
   `;
@@ -285,12 +459,12 @@ function updateQueueItem(id) {
 
   switch (dl.status) {
     case 'preparing':
-      detail.textContent = 'Preparing, hold your goddamn horses...';
+      detail.textContent = t('Preparing, hold your goddamn horses...');
       break;
     case 'downloading':
       if (dl.percent >= 99.5) {
         fill.classList.add('processing');
-        detail.textContent = 'Processing clip, sit your ass down...';
+        detail.textContent = t('Processing clip, sit your ass down...');
       } else {
         fill.classList.remove('processing');
         detail.textContent = `${Math.round(dl.percent)}%${dl.speed ? ' · ' + dl.speed : ''}`;
@@ -300,23 +474,23 @@ function updateQueueItem(id) {
       fill.className = 'queue-item__fill complete';
       fill.style.width = '100%';
       const svg = '<svg class="check-icon" viewBox="0 0 12 12"><circle cx="6" cy="6" r="6"/><path d="M3.5 6.5l2 2 3-4"/></svg>';
-      detail.innerHTML = svg + 'Done, you lucky bastard';
+      detail.innerHTML = svg + t('Done, you lucky bastard');
       if (!el.querySelector('.queue-item__show-file')) {
         const btn = document.createElement('button');
         btn.className = 'queue-item__show-file';
-        btn.textContent = 'Show File';
+        btn.textContent = t('Show File');
         detail.parentNode.appendChild(btn);
       }
       break;
     }
     case 'error':
       fill.className = 'queue-item__fill error';
-      detail.textContent = dl.error || 'Failed miserably';
+      detail.textContent = dl.error || t('Failed miserably');
       detail.title = dl.error || '';
       break;
     case 'cancelled':
       fill.className = 'queue-item__fill cancelled';
-      detail.textContent = 'Cancelled, you indecisive clown';
+      detail.textContent = t('Cancelled, you indecisive clown');
       break;
   }
 
@@ -377,7 +551,7 @@ queueList.addEventListener('click', (e) => {
     if (dl?.filePath) {
       window.api.revealInFinder(dl.filePath).then(result => {
         if (!result.found) {
-          showStatus('warning', 'File vanished, you probably deleted it yourself. Opened the folder instead.');
+          showStatus('warning', t('File vanished, you probably deleted it yourself. Opened the folder instead.'));
         }
       });
     }
@@ -424,6 +598,8 @@ function updatePillPosition(animate) {
 function openSettings() {
   state.settingsOpen = true;
   closeQueue();
+  closeProjectDropdown();
+  closeHelp();
   settingsPopover.classList.add('open');
   settingsBackdrop.classList.add('visible');
   settingsBtn.closest('.settings-anchor').classList.add('open');
@@ -446,6 +622,37 @@ function toggleSettings() {
 
 settingsBackdrop.addEventListener('click', () => {
   closeSettings();
+  closeHelp();
+});
+
+/* ============================================================
+   Help / Supported Services Popover
+   ============================================================ */
+
+function openHelp() {
+  state.helpOpen = true;
+  closeSettings();
+  closeQueue();
+  closeProjectDropdown();
+  helpPopover.classList.add('open');
+  settingsBackdrop.classList.add('visible');
+}
+
+function closeHelp() {
+  state.helpOpen = false;
+  helpPopover.classList.remove('open');
+  if (!state.settingsOpen) {
+    settingsBackdrop.classList.remove('visible');
+  }
+}
+
+function toggleHelp() {
+  if (state.helpOpen) closeHelp(); else openHelp();
+}
+
+helpBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleHelp();
 });
 
 /* ============================================================
@@ -461,12 +668,23 @@ const STICKERS = {
     'stickers/good4.avif',  'stickers/good5.avif',  'stickers/good6.avif',
     'stickers/good7.avif',  'stickers/good8.avif',  'stickers/good9.avif',
     'stickers/good10.avif', 'stickers/good11.avif', 'stickers/good12.avif',
-    'stickers/good13.webp',
+    'stickers/good13.webp', 'stickers/good14.avif', 'stickers/good15.avif',
+    'stickers/good16.avif', 'stickers/good17.avif', 'stickers/good18.webp',
+    'stickers/good19.webp', 'stickers/good20.webp', 'stickers/good21.webp',
+    'stickers/good22.webp', 'stickers/good23.png',  'stickers/good24.png',
+    'stickers/good25.png',  'stickers/good26.png',  'stickers/good27.png',
+    'stickers/good28.png',  'stickers/good29.png',  'stickers/good30.png',
+    'stickers/good31.png',  'stickers/good14.png',  'stickers/good32.png',
+    'stickers/good33.png',
   ],
   bad: [
-    'stickers/bad1.avif', 'stickers/bad2.avif', 'stickers/bad3.avif',
-    'stickers/bad4.avif', 'stickers/bad.webp',  'stickers/bad5.webp',
-    'stickers/bad6.webp',
+    'stickers/bad1.avif',  'stickers/bad2.avif',
+    'stickers/bad3.avif',  'stickers/bad4.avif',  'stickers/bad5.webp',
+    'stickers/bad6.webp',  'stickers/bad7.avif',  'stickers/bad8.avif',
+    'stickers/bad9.webp',  'stickers/bad10.webp', 'stickers/bad11.png',
+    'stickers/bad12.png',  'stickers/bad13.png',  'stickers/bad14.png',
+    'stickers/bad15.png',  'stickers/bad16.png',  'stickers/bad17.png',
+    'stickers/bad18.png',
   ],
 };
 
@@ -544,6 +762,33 @@ statusCopy.addEventListener('click', async () => {
   setTimeout(() => { statusCopy.innerHTML = origHTML; }, 1500);
 });
 
+/* ============================================================
+   Activity Toast — subtle background task indicator
+   ============================================================ */
+
+let activityHideTimer = null;
+
+function showActivityToast(message) {
+  clearTimeout(activityHideTimer);
+  activityText.textContent = message;
+  activityToast.classList.remove('done');
+  activityToast.classList.add('visible');
+  activityHideTimer = setTimeout(() => hideActivityToast(), 15000);
+}
+
+function completeActivityToast(message, duration = 2500) {
+  if (!activityToast.classList.contains('visible')) return;
+  activityText.textContent = message;
+  activityToast.classList.add('done');
+  activityHideTimer = setTimeout(() => hideActivityToast(), duration);
+}
+
+function hideActivityToast() {
+  clearTimeout(activityHideTimer);
+  activityToast.classList.remove('visible');
+  setTimeout(() => activityToast.classList.remove('done'), 300);
+}
+
 function updateDownloadBtnState() {
   if (state.carouselData) {
     downloadBtn.disabled = state.carouselSelected.size === 0 || state.isFetchingInfo;
@@ -556,13 +801,13 @@ function updateDownloadBtnState() {
 
 function getDownloadDisabledReason() {
   if (state.carouselData) {
-    if (state.isFetchingInfo) return 'Hold on, fetching...';
-    if (state.carouselSelected.size === 0) return 'Select items to download';
+    if (state.isFetchingInfo) return t('Hold on, fetching...');
+    if (state.carouselSelected.size === 0) return t('Select items to download');
   }
-  if (state.isFetchingInfo) return 'Hold on, fetching video info...';
-  if (!state.videoInfo) return 'Paste a URL first';
-  if (!validateClipTimes()) return 'Fix clip times (start must be before end)';
-  return 'Not ready yet';
+  if (state.isFetchingInfo) return t('Hold on, fetching video info...');
+  if (!state.videoInfo) return t('Paste a URL first champ');
+  if (!validateClipTimes()) return t('Fix clip times (start must be before end)');
+  return t('Not ready yet');
 }
 
 function validateClipTimes() {
@@ -606,6 +851,7 @@ function enforceTimeFormat(input) {
   input.addEventListener('input', () => {
     let val = input.value.replace(/[^0-9:]/g, '');
     input.value = val;
+    input.classList.remove('auto-filled');
     updateDownloadBtnState();
   });
 
@@ -659,7 +905,7 @@ async function handleUrlChange() {
   }
 
   if (platform === 'tiktok' && isTiktokPhotoUrl(url)) {
-    showStatus('warning', 'TikTok photo slideshows aren\'t supported yet. Video posts work great though!');
+    showStatus('warning', t('TikTok photo slideshows aren\'t supported yet. Video posts work great though!'));
     resetVideoState();
     return;
   }
@@ -679,15 +925,16 @@ async function fetchInfo(url) {
   hideStatus();
   statusRetry.style.display = 'none';
   hideCarousel();
+  startTime.classList.remove('auto-filled');
 
-  urlHint.textContent = 'Scanning the goddamn link...';
+  urlHint.textContent = t('Scanning the goddamn link...');
   urlHint.classList.remove('clipboard');
-  downloadBtn.textContent = 'Download This Shit';
+  downloadBtn.textContent = t('Download This Shit');
 
   videoCard.className = 'video-card visible loading';
   videoThumb.classList.remove('loaded');
   videoThumb.removeAttribute('src');
-  videoTitle.textContent = 'Loading...';
+  videoTitle.textContent = t('Loading...');
   videoMeta.textContent = '';
   videoQualities.textContent = '';
   updateDownloadBtnState();
@@ -717,14 +964,24 @@ async function fetchInfo(url) {
     const isYouTube = info.platform === 'youtube' || !info.platform;
     startTime.disabled = !isYouTube;
     endTime.disabled = !isYouTube;
-    if (isImage) downloadBtn.textContent = 'Download Image';
+
+    if (isYouTube) {
+      const urlTimestamp = extractYouTubeTimestamp(url);
+      if (urlTimestamp > 0) {
+        startTime.value = secondsToTimeString(urlTimestamp);
+        startTime.classList.add('auto-filled');
+        updateTimeHasValue();
+      }
+    }
+
+    if (isImage) downloadBtn.textContent = t('Download Image');
     updateQualityLabels(info.platform, info.mediaType);
     updateDownloadBtnState();
 
-    urlHint.textContent = 'Locked in. Ready to rip.';
+    urlHint.textContent = t('Locked in. Ready to rip.');
     urlHint.classList.add('clipboard');
     setTimeout(() => {
-      if (urlHint.textContent === 'Locked in. Ready to rip.') {
+      if (urlHint.textContent === t('Locked in. Ready to rip.')) {
         urlHint.textContent = '';
         urlHint.classList.remove('clipboard');
       }
@@ -744,6 +1001,12 @@ async function fetchInfo(url) {
   }
 }
 
+function updateTimeHasValue() {
+  const zero = '00:00:00';
+  startTime.classList.toggle('has-value', startTime.value.trim() !== zero && startTime.value.trim() !== '');
+  endTime.classList.toggle('has-value', endTime.value.trim() !== zero && endTime.value.trim() !== '');
+}
+
 function resetVideoState() {
   state.videoInfo = null;
   videoCard.className = 'video-card';
@@ -751,6 +1014,8 @@ function resetVideoState() {
   endTime.disabled = true;
   startTime.value = '00:00:00';
   endTime.value = '00:00:00';
+  startTime.classList.remove('auto-filled');
+  updateTimeHasValue();
   hideCarousel();
   resetQualityLabels();
   updateDownloadBtnState();
@@ -769,7 +1034,7 @@ async function fetchInstagramContent(url) {
   statusRetry.style.display = 'none';
   hideCarousel();
 
-  urlHint.textContent = 'Checking Instagram post...';
+  urlHint.textContent = t('Checking Instagram post...');
   urlHint.classList.remove('clipboard');
   updateDownloadBtnState();
 
@@ -780,7 +1045,7 @@ async function fetchInstagramContent(url) {
       if (mediaInfo.isCarousel && mediaInfo.items.length > 1) {
         showCarouselPicker(mediaInfo, url);
         updateQualityLabels('instagram', 'carousel');
-        urlHint.textContent = 'Select items to download';
+        urlHint.textContent = t('Select items to download');
         urlHint.classList.add('clipboard');
 
         if (!mediaInfo.items.some(i => i.type === 'video')) {
@@ -794,19 +1059,19 @@ async function fetchInstagramContent(url) {
       if (singleItem.type === 'video') {
         showSingleVideoCard(mediaInfo, url);
         updateQualityLabels('instagram', 'video');
-        urlHint.textContent = 'Reel ready to download';
+        urlHint.textContent = t('Reel ready to download');
         urlHint.classList.add('clipboard');
         return;
       }
 
       showSingleImageCard(mediaInfo, url);
       updateQualityLabels('instagram', 'image');
-      urlHint.textContent = 'Image ready to download';
+      urlHint.textContent = t('Image ready to download');
       urlHint.classList.add('clipboard');
       return;
     }
 
-    showStatus('error', 'Couldn\'t fetch this Instagram post. It may be private or require login.');
+    showStatus('error', t('Couldn\'t fetch this Instagram post. It may be private or require login.'));
     lastFailedUrl = url;
     statusRetry.style.display = '';
   } catch (err) {
@@ -872,7 +1137,7 @@ function showSingleImageCard(mediaInfo, webpageUrl) {
   startTime.disabled = true;
   endTime.disabled = true;
   downloadBtn.disabled = false;
-  downloadBtn.textContent = 'Download Image';
+  downloadBtn.textContent = t('Download Image');
 }
 
 function showSingleVideoCard(mediaInfo, webpageUrl) {
@@ -907,7 +1172,7 @@ function showSingleVideoCard(mediaInfo, webpageUrl) {
   startTime.disabled = true;
   endTime.disabled = true;
   downloadBtn.disabled = false;
-  downloadBtn.textContent = 'Download Reel';
+  downloadBtn.textContent = t('Download Reel');
 }
 
 /* ============================================================
@@ -976,16 +1241,16 @@ function updateCarouselCount() {
   carouselCount.textContent = `${count} of ${total} selected`;
 
   downloadBtn.disabled = count === 0;
-  downloadBtn.textContent = count > 0 ? `Download ${count} Item${count > 1 ? 's' : ''}` : 'Download This Shit';
+  downloadBtn.textContent = count > 0 ? `Download ${count} Item${count > 1 ? 's' : ''}` : t('Download This Shit');
 
-  carouselSelectAll.textContent = count === total ? 'Deselect All' : 'Select All';
+  carouselSelectAll.textContent = count === total ? t('Deselect All') : t('Select All');
 }
 
 function hideCarousel() {
   carouselCard.classList.remove('visible');
   state.carouselData = null;
   state.carouselSelected = new Set();
-  downloadBtn.textContent = 'Download This Shit';
+  downloadBtn.textContent = t('Download This Shit');
 }
 
 carouselSelectAll.addEventListener('click', () => {
@@ -994,10 +1259,10 @@ carouselSelectAll.addEventListener('click', () => {
 
   if (state.carouselSelected.size === total) {
     state.carouselSelected.clear();
-    carouselGrid.querySelectorAll('.carousel-thumb').forEach(t => t.classList.remove('selected'));
+    carouselGrid.querySelectorAll('.carousel-thumb').forEach(el => el.classList.remove('selected'));
   } else {
     for (let i = 0; i < total; i++) state.carouselSelected.add(i);
-    carouselGrid.querySelectorAll('.carousel-thumb').forEach(t => t.classList.add('selected'));
+    carouselGrid.querySelectorAll('.carousel-thumb').forEach(el => el.classList.add('selected'));
   }
   updateCarouselCount();
 });
@@ -1132,7 +1397,7 @@ async function handleCarouselDownload() {
     if (filePaths.length > 0 && !el.querySelector('.queue-item__show-file')) {
       const btn = document.createElement('button');
       btn.className = 'queue-item__show-file';
-      btn.textContent = 'Show Files';
+      btn.textContent = t('Show Files');
       detail.parentNode.appendChild(btn);
     }
   }
@@ -1144,12 +1409,21 @@ async function handleCarouselDownload() {
 
   if (errorCount > 0 && downloadedCount > 0) {
     showStatus('warning', `Downloaded ${downloadedCount} items, ${errorCount} failed.`);
-    window.api.showNotification('Carousel partially done', `${downloadedCount} of ${total} saved`, filePaths[0] || '');
+    const partialTitle = tp('carouselPartialTitle') || 'Carousel partially done, not your best work';
+    window.api.showNotification(partialTitle, `${downloadedCount} of ${total} saved`, filePaths[0] || '', 'bad');
   } else if (errorCount > 0 && downloadedCount === 0) {
     showStatus('error', `Failed to download all ${errorCount} items.`);
+    const failTitle = tp('carouselFailTitle') || 'Carousel download failed, absolute disaster';
+    window.api.showNotification(
+      failTitle,
+      `All ${errorCount} item${errorCount > 1 ? 's' : ''} failed to download.`,
+      '',
+      'bad'
+    );
   } else {
     showStatus('success', `Downloaded ${downloadedCount} item${downloadedCount > 1 ? 's' : ''}.`);
-    window.api.showNotification('Carousel downloaded, you absolute legend', `${downloadedCount} item${downloadedCount > 1 ? 's' : ''} saved`, filePaths[0] || '');
+    const notifTitle = tp('carouselNotifTitle') || 'Carousel downloaded, you absolute legend';
+    window.api.showNotification(notifTitle, `${downloadedCount} item${downloadedCount > 1 ? 's' : ''} saved`, filePaths[0] || '', 'good');
   }
 }
 
@@ -1292,7 +1566,7 @@ async function handleDownload() {
     d => d.status === 'preparing' || d.status === 'downloading'
   ).length;
   if (activeCount >= MAX_CONCURRENT) {
-    showStatus('warning', `Slow down, you greedy bastard! Max ${MAX_CONCURRENT} at once.`);
+    showStatus('warning', tp('maxConcurrent', MAX_CONCURRENT) || `Slow down, you greedy bastard! Max ${MAX_CONCURRENT} at once.`);
     shakeElement(downloadBtn);
     return;
   }
@@ -1314,7 +1588,7 @@ async function handleDownload() {
     downloadBtn.addEventListener('animationend', () => downloadBtn.classList.remove('kick'), { once: true });
     if (!state.queueOpen) openQueue();
   } catch (err) {
-    showStatus('error', err.message || 'Download crashed and burned, you buffoon. Try again.');
+    showStatus('error', err.message || t('Download crashed and burned, you buffoon. Try again.'));
   }
 }
 
@@ -1352,14 +1626,14 @@ window.api.onDownloadComplete((data) => {
     updateQueueItem(data.id);
   }
 
-  showStatus('success', 'Done, you lucky bastard!');
+  showStatus('success', t('Done, you lucky bastard!'));
 });
 
 window.api.onDownloadError((data) => {
   const dl = state.downloads.get(data.id);
   if (!dl) return;
   dl.status = 'error';
-  dl.error = data.error || 'Failed miserably';
+  dl.error = data.error || t('Failed miserably');
   progressManagers.get(data.id)?.stop();
   progressManagers.delete(data.id);
   updateQueueItem(data.id);
@@ -1373,6 +1647,7 @@ window.api.onDownloadCancelled((data) => {
   progressManagers.get(data.id)?.stop();
   progressManagers.delete(data.id);
   updateQueueItem(data.id);
+  showStatus('info', t('Download cancelled'));
 });
 
 /* ============================================================
@@ -1380,10 +1655,27 @@ window.api.onDownloadCancelled((data) => {
    ============================================================ */
 
 window.api.onYtdlpUpdated((version) => {
-  showStatus('success', `yt-dlp auto-updated to ${version}. You're good to go!`);
+  showStatus('success', tp('ytdlpAutoUpdated', version) || `Download engine updated to ${version}. Let's go!`);
 });
 
+window.api.onBackgroundActivity((data) => {
+  if (data.type === 'ytdlp-check') {
+    if (data.status === 'checking') {
+      showActivityToast(t('Hold tight, making sure everything works…'));
+    } else if (data.status === 'updated') {
+      completeActivityToast(t('All systems go, baby'));
+    } else if (data.status === 'up-to-date') {
+      completeActivityToast(t('All systems go, baby'));
+    } else {
+      completeActivityToast(t('Ready'), 2000);
+    }
+  }
+});
+
+let isFirstFocus = true;
+
 window.api.onWindowFocus(async () => {
+  if (isFirstFocus) { isFirstFocus = false; return; }
   if (!state.autoPaste) return;
   if (state.isFetchingInfo) return;
   try {
@@ -1524,6 +1816,9 @@ urlClear.addEventListener('click', () => {
 
 downloadBtn.addEventListener('click', handleDownload);
 
+startTime.addEventListener('input', updateTimeHasValue);
+endTime.addEventListener('input', updateTimeHasValue);
+
 let disabledHintTimer = null;
 downloadBtn.addEventListener('pointerdown', () => {
   if (!downloadBtn.disabled) return;
@@ -1541,8 +1836,173 @@ pathDisplay.addEventListener('click', async () => {
   const selected = await window.api.selectFolder();
   if (selected) {
     state.downloadPath = selected;
-    pathDisplay.textContent = truncatePath(selected);
-    pathDisplay.title = selected;
+    updatePathDisplay();
+  }
+});
+
+function getEffectivePath() {
+  if (state.activeProject) {
+    return state.downloadPath + '/' + state.activeProject;
+  }
+  return state.downloadPath;
+}
+
+function updatePathDisplay() {
+  const effective = getEffectivePath();
+  pathDisplay.innerHTML = '<span class="path-display__label">save to:</span> ' + escapeHtml(truncatePath(effective));
+  pathDisplay.title = effective;
+}
+
+function updateProjectUI() {
+  if (state.activeProject) {
+    projectBtn.style.display = 'none';
+    projectPill.style.display = '';
+    projectPillName.textContent = state.activeProject;
+  } else {
+    projectBtn.style.display = '';
+    projectPill.style.display = 'none';
+    projectPillName.textContent = '';
+  }
+  updatePathDisplay();
+}
+
+function openProjectDropdown() {
+  state.projectDropdownOpen = true;
+  pathRow.classList.add('project-open');
+  projectDropdown.classList.add('visible');
+  projectBackdrop.classList.add('visible');
+  projectInput.value = '';
+  projectInput.placeholder = state.projects.length
+    ? t('Add new project')
+    : t('Name this project, fam');
+  renderProjectList();
+  requestAnimationFrame(() => projectInput.focus());
+}
+
+function closeProjectDropdown() {
+  state.projectDropdownOpen = false;
+  pathRow.classList.remove('project-open');
+  projectDropdown.classList.remove('visible');
+  projectBackdrop.classList.remove('visible');
+  projectInput.value = '';
+}
+
+function renderProjectList(filter) {
+  const term = (filter || '').toLowerCase();
+  const filtered = term
+    ? state.projects.filter(p => p.toLowerCase().includes(term))
+    : state.projects;
+
+  projectList.innerHTML = '';
+
+  if (filtered.length === 0 && !term) {
+    projectEmpty.style.display = '';
+    projectHint.style.display = 'none';
+    return;
+  }
+  projectEmpty.style.display = 'none';
+
+  const exactMatch = term && state.projects.some(p => p.toLowerCase() === term);
+  if (term && !exactMatch) {
+    projectHint.textContent = `↵ Enter to create "${filter}"`;
+    projectHint.style.display = '';
+  } else {
+    projectHint.style.display = 'none';
+  }
+
+  const counts = {};
+  for (const entry of state.historyData) {
+    if (entry.project) {
+      counts[entry.project] = (counts[entry.project] || 0) + 1;
+    }
+  }
+
+  for (const name of filtered) {
+    const row = document.createElement('button');
+    row.className = 'project-dropdown__item';
+    if (state.activeProject === name) row.classList.add('active');
+    const count = counts[name] || 0;
+    row.innerHTML = `<span class="project-dropdown__item-name">${escapeHtml(name)}</span><span class="project-dropdown__item-count">${count}</span>`;
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state.activeProject === name) {
+        setActiveProject(null);
+      } else {
+        setActiveProject(name);
+      }
+      closeProjectDropdown();
+    });
+    projectList.appendChild(row);
+  }
+}
+
+async function setActiveProject(name) {
+  const result = await window.api.setActiveProject(name);
+  state.activeProject = result;
+  if (result) {
+    const existing = state.projects.filter(p => p !== result);
+    existing.unshift(result);
+    state.projects = existing;
+    showStatus('info', `Locked into ${result}. Downloads go there now.`);
+  } else {
+    showStatus('info', 'Project cleared. Back to the main dump.');
+  }
+  updateProjectUI();
+}
+
+projectBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (state.projectDropdownOpen) {
+    closeProjectDropdown();
+  } else {
+    openProjectDropdown();
+  }
+});
+
+projectPillClear.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setActiveProject(null);
+});
+
+projectPill.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (state.projectDropdownOpen) {
+    closeProjectDropdown();
+  } else {
+    openProjectDropdown();
+  }
+});
+
+projectBackdrop.addEventListener('click', () => {
+  closeProjectDropdown();
+});
+
+projectInput.addEventListener('input', () => {
+  renderProjectList(projectInput.value.trim());
+});
+
+projectInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const name = projectInput.value.trim();
+    if (name) {
+      setActiveProject(name);
+      closeProjectDropdown();
+    }
+  } else if (e.key === 'Escape') {
+    closeProjectDropdown();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+    e.preventDefault();
+    if (state.historyOpen || state.settingsOpen) return;
+    if (state.projectDropdownOpen) {
+      closeProjectDropdown();
+    } else {
+      openProjectDropdown();
+    }
   }
 });
 
@@ -1565,26 +2025,40 @@ showInFinderToggle.addEventListener('click', (e) => {
   window.api.setSetting('showInFinder', state.showInFinder);
 });
 
+modeToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  state.mode = state.mode === 'unhinged' ? 'professional' : 'unhinged';
+  modeToggle.classList.toggle('active', state.mode === 'professional');
+  window.api.setSetting('mode', state.mode);
+  applyMode();
+  if (state.mode === 'unhinged') {
+    showStatus('success', 'Lets fucking go! Welcome to Unhinged mode lol');
+  } else {
+    showStatus('success', 'Honestly, fair enough. Welcome to Professional mode');
+    setSticker('bad');
+  }
+});
+
 enforceTimeFormat(startTime);
 enforceTimeFormat(endTime);
 
 updateYtdlpBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
   updateYtdlpBtn.disabled = true;
-  updateYtdlpBtn.textContent = 'Updating…';
+  updateYtdlpBtn.textContent = t('Updating…');
   updateYtdlpBtn.classList.add('updating');
   try {
     const result = await window.api.updateYtdlp();
     if (result.success) {
-      showStatus('success', `yt-dlp fucking updated to ${result.version}, bitch!`);
+      showStatus('success', tp('ytdlpUpdated', result.version) || `Download engine updated to ${result.version}, let's go!`);
     } else {
-      showStatus('error', `Update failed: ${result.error} - what did you expect, you dim bulb?`);
+      showStatus('error', tp('ytdlpUpdateFailed', result.error) || `Update failed: ${result.error} - what did you expect, you dim bulb?`);
     }
   } catch (err) {
-    showStatus('error', 'Failed to update yt-dlp, you clumsy oaf.');
+    showStatus('error', t('Failed to update download engine, what the helly!'));
   } finally {
     updateYtdlpBtn.disabled = false;
-    updateYtdlpBtn.textContent = 'Update';
+    updateYtdlpBtn.textContent = t('Update');
     updateYtdlpBtn.classList.remove('updating');
   }
 });
@@ -1653,8 +2127,10 @@ function qualityLabel(q) {
 
 async function openHistory() {
   state.historyOpen = true;
+  state.historyProjectFilter = null;
   closeSettings();
   closeQueue();
+  closeProjectDropdown();
   historyView.classList.add('visible');
   await loadHistory();
 }
@@ -1664,6 +2140,7 @@ function closeHistory() {
   historyView.classList.remove('visible');
   historySearch.value = '';
   state.historySearchTerm = '';
+  state.historyProjectFilter = null;
 }
 
 async function loadHistory() {
@@ -1682,13 +2159,17 @@ function getFilteredHistory() {
     entries = entries.filter(e => e.mediaType === 'image' || e.mediaType === 'carousel');
   }
 
+  if (state.historyProjectFilter) {
+    entries = entries.filter(e => e.project === state.historyProjectFilter);
+  }
+
   if (state.historySearchTerm) {
     const term = state.historySearchTerm.toLowerCase();
     entries = entries.filter(e => {
       const searchable = [
         e.title, e.uploader, e.channel,
         e.webpageUrl, e.description, e.videoId,
-        e.platform || '',
+        e.platform || '', e.project || '',
         ...(e.tags || []), ...(e.categories || []),
       ].join(' ').toLowerCase();
       return searchable.includes(term);
@@ -1711,6 +2192,8 @@ function renderHistoryList() {
   const count = entries.length;
   historyCount.textContent = `${count} download${count !== 1 ? 's' : ''}`;
 
+  updateHistoryProjectFilter();
+
   if (count === 0) {
     historyEmpty.classList.add('visible');
     historyList.style.display = 'none';
@@ -1724,6 +2207,62 @@ function renderHistoryList() {
     historyList.appendChild(createHistoryEntryEl(entry));
   }
 }
+
+function updateHistoryProjectFilter() {
+  const projectsInHistory = new Set();
+  for (const entry of state.historyData) {
+    if (entry.project) projectsInHistory.add(entry.project);
+  }
+
+  if (projectsInHistory.size === 0) {
+    historyProjectFilter.style.display = 'none';
+    return;
+  }
+  historyProjectFilter.style.display = '';
+
+  historyProjectBtn.textContent = state.historyProjectFilter
+    ? `${state.historyProjectFilter} ▾`
+    : 'All Projects ▾';
+  historyProjectBtn.classList.toggle('active', !!state.historyProjectFilter);
+
+  historyProjectMenu.innerHTML = '';
+  const allItem = document.createElement('button');
+  allItem.className = 'history-project-menu__item';
+  if (!state.historyProjectFilter) allItem.classList.add('active');
+  allItem.textContent = 'All Projects';
+  allItem.addEventListener('click', (e) => {
+    e.stopPropagation();
+    state.historyProjectFilter = null;
+    historyProjectMenu.classList.remove('visible');
+    renderHistoryList();
+  });
+  historyProjectMenu.appendChild(allItem);
+
+  for (const name of projectsInHistory) {
+    const item = document.createElement('button');
+    item.className = 'history-project-menu__item';
+    if (state.historyProjectFilter === name) item.classList.add('active');
+    item.textContent = name;
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.historyProjectFilter = name;
+      historyProjectMenu.classList.remove('visible');
+      renderHistoryList();
+    });
+    historyProjectMenu.appendChild(item);
+  }
+}
+
+historyProjectBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  historyProjectMenu.classList.toggle('visible');
+});
+
+document.addEventListener('click', (e) => {
+  if (!historyProjectFilter.contains(e.target)) {
+    historyProjectMenu.classList.remove('visible');
+  }
+});
 
 function createHistoryEntryEl(entry) {
   const el = document.createElement('div');
@@ -1806,6 +2345,9 @@ function createHistoryEntryEl(entry) {
     detailRows.push({ label: 'File', value: entry.filePath || '—', clickToReveal: !!entry.filePath });
     detailRows.push({ label: 'Size', value: formatFileSize(entry.fileSize) });
   }
+  if (entry.project) {
+    detailRows.push({ label: 'Project', value: entry.project });
+  }
   detailRows.push({ label: 'Downloaded', value: formatFullDate(entry.downloadedAt) });
 
   const dlHtml = detailRows.map(r => {
@@ -1828,6 +2370,7 @@ function createHistoryEntryEl(entry) {
       </div>
       ${qualityBadge}
       ${entry.platform && entry.platform !== 'youtube' ? `<span class="history-entry__platform">${escapeHtml(entry.platform)}</span>` : ''}
+      ${entry.project ? `<span class="history-entry__project">${escapeHtml(entry.project)}</span>` : ''}
       <span class="history-entry__date">${escapeHtml(formatRelativeDate(entry.downloadedAt))}</span>
       <span class="history-entry__chevron">
         <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
@@ -1861,7 +2404,7 @@ function createHistoryEntryEl(entry) {
       const result = await window.api.revealInFinder(fp);
       if (!result.found) {
         fileLink.classList.add('missing');
-        fileLink.title = 'File was moved or deleted — opened download folder';
+        fileLink.title = t('File was moved or deleted — opened download folder');
       }
     });
   });
@@ -1902,10 +2445,10 @@ function createHistoryEntryEl(entry) {
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
       const btn = e.currentTarget;
-      btn.textContent = 'Copied!';
+      btn.textContent = t('Copied!');
       btn.classList.add('pop');
       btn.addEventListener('animationend', () => btn.classList.remove('pop'), { once: true });
-      setTimeout(() => { btn.textContent = 'Copy Info'; }, 1500);
+      setTimeout(() => { btn.textContent = t('Copy Info'); }, 1500);
     } catch { /* clipboard access denied */ }
   });
 
@@ -1915,10 +2458,10 @@ function createHistoryEntryEl(entry) {
       try {
         await navigator.clipboard.writeText(entry.webpageUrl);
         const btn = e.currentTarget;
-        btn.textContent = 'Copied!';
+        btn.textContent = t('Copied!');
         btn.classList.add('pop');
         btn.addEventListener('animationend', () => btn.classList.remove('pop'), { once: true });
-        setTimeout(() => { btn.textContent = 'Copy URL'; }, 1500);
+        setTimeout(() => { btn.textContent = t('Copy URL'); }, 1500);
       } catch { /* clipboard access denied */ }
     }
   });
@@ -1974,6 +2517,10 @@ historyBack.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.projectDropdownOpen) {
+    closeProjectDropdown();
+    return;
+  }
   if (e.key === 'Escape' && state.historyOpen) {
     closeHistory();
     return;
@@ -1988,7 +2535,7 @@ historyClearBtn.addEventListener('click', async () => {
   if (state.historyData.length === 0) return;
   if (historyClearBtn.classList.contains('confirm')) return;
   const count = state.historyData.length;
-  historyClearBtn.textContent = `Nuke these ${count} worthless entries, bitch?`;
+  historyClearBtn.textContent = tp('nukeEntries', count) || `Nuke these ${count} worthless entries, bitch?`;
   historyClearBtn.classList.add('confirm');
 
   const onConfirm = async () => {
@@ -1996,12 +2543,12 @@ historyClearBtn.addEventListener('click', async () => {
     await window.api.clearHistory();
     state.historyData = [];
     renderHistoryList();
-    historyClearBtn.textContent = 'Clear All, You Coward';
+    historyClearBtn.textContent = t('Clear All, champ');
     historyClearBtn.classList.remove('confirm');
   };
 
   const onCancel = () => {
-    historyClearBtn.textContent = 'Clear All, You Coward';
+    historyClearBtn.textContent = t('Clear All, champ');
     historyClearBtn.classList.remove('confirm');
     historyClearBtn.removeEventListener('click', onConfirm);
     document.removeEventListener('click', onOutside);
@@ -2021,7 +2568,7 @@ historyClearBtn.addEventListener('click', async () => {
 
 historySortBtn.addEventListener('click', () => {
   state.historySortNewest = !state.historySortNewest;
-  historySortBtn.textContent = state.historySortNewest ? 'Newest first' : 'Oldest first';
+  historySortBtn.textContent = state.historySortNewest ? t('Newest first') : t('Oldest first');
   renderHistoryList();
 });
 
@@ -2048,12 +2595,17 @@ async function init() {
   state.selectedQuality = settings.quality || 'best';
   state.autoPaste = settings.autoPaste !== false;
   state.showInFinder = settings.showInFinder === true;
-  pathDisplay.textContent = truncatePath(settings.downloadPath);
-  pathDisplay.title = settings.downloadPath;
+  state.mode = settings.mode || 'unhinged';
+  state.activeProject = settings.activeProject || null;
+  state.projects = settings.projects || [];
+  state.historyData = await window.api.getHistory();
+  updateProjectUI();
   appVersion.textContent = `v${version}`;
 
   autoPasteToggle.classList.toggle('active', state.autoPaste);
   showInFinderToggle.classList.toggle('active', state.showInFinder);
+  modeToggle.classList.toggle('active', state.mode === 'professional');
+  applyMode();
 
   const qualityBtns = qualitySelector.querySelectorAll('.quality-option');
   qualityBtns.forEach(btn => {
@@ -2077,7 +2629,7 @@ async function init() {
         e.stopPropagation();
         if (update.url) window.api.openExternal(update.url);
       });
-      showStatus('info', `New version v${update.version} available! Check Settings.`);
+      showStatus('info', tp('newVersionAvailable', update.version) || `New version v${update.version} available! Check Settings.`);
     }
   } catch { /* no update check errors shown */ }
 }

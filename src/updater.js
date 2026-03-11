@@ -15,11 +15,12 @@ function githubGet(url, redirectCount = 0) {
       reject(new Error('Too many redirects'));
       return;
     }
-    https.get(url, {
+    const req = https.get(url, {
       headers: {
         'User-Agent': 'YouTube-Clip-Downloader',
         Accept: 'application/vnd.github.v3+json',
       },
+      timeout: 6000,
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         githubGet(res.headers.location, redirectCount + 1).then(resolve).catch(reject);
@@ -39,6 +40,7 @@ function githubGet(url, redirectCount = 0) {
         }
       });
     }).on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
   });
 }
 
@@ -91,7 +93,7 @@ async function getCurrentYtdlpVersion() {
   const { execFile } = require('child_process');
   const ytdlpPath = getYtdlpPath();
   return new Promise((resolve) => {
-    execFile(ytdlpPath, ['--version'], { timeout: 10000 }, (err, stdout) => {
+    execFile(ytdlpPath, ['--version'], { timeout: 3000 }, (err, stdout) => {
       if (err) { resolve(null); return; }
       resolve(stdout.trim());
     });
@@ -125,8 +127,17 @@ async function updateYtdlp() {
   }
 }
 
-async function ensureYtdlpFresh() {
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+async function ensureYtdlpFresh(store) {
   try {
+    if (store) {
+      const lastCheck = store.get('lastYtdlpCheck');
+      if (lastCheck && (Date.now() - lastCheck) < CHECK_INTERVAL_MS) {
+        return { success: true, skipped: true };
+      }
+    }
+
     const current = await getCurrentYtdlpVersion();
     if (!current) {
       console.log('[updater] yt-dlp version unknown, attempting update...');
@@ -141,9 +152,12 @@ async function ensureYtdlpFresh() {
 
     if (isNewerVersion(latestClean, currentClean)) {
       console.log(`[updater] yt-dlp outdated (${current} → ${latest}), updating...`);
-      return await updateYtdlp();
+      const result = await updateYtdlp();
+      if (result.success && store) store.set('lastYtdlpCheck', Date.now());
+      return result;
     }
 
+    if (store) store.set('lastYtdlpCheck', Date.now());
     return { success: true, version: current, skipped: true };
   } catch (err) {
     console.error('[updater] auto-update check failed:', err.message);

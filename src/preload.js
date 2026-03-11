@@ -18,11 +18,14 @@ contextBridge.exposeInMainWorld('api', {
   getClipboard: () => ipcRenderer.invoke('get-clipboard'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   cleanupPartialFiles: (dir) => ipcRenderer.invoke('cleanup-partial-files', dir),
+  getProjects: () => ipcRenderer.invoke('get-projects'),
+  getActiveProject: () => ipcRenderer.invoke('get-active-project'),
+  setActiveProject: (name) => ipcRenderer.invoke('set-active-project', name),
   getHistory: () => ipcRenderer.invoke('get-history'),
   deleteHistoryEntry: (id) => ipcRenderer.invoke('delete-history-entry', id),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
-  showNotification: (title, body, filePath) => ipcRenderer.invoke('show-notification', title, body, filePath),
+  showNotification: (title, body, filePath, stickerType) => ipcRenderer.invoke('show-notification', title, body, filePath, stickerType),
 
   onDownloadProgress: (callback) => {
     const listener = (_event, data) => callback(data);
@@ -53,5 +56,10 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_event, version) => callback(version);
     ipcRenderer.on('ytdlp-updated', listener);
     return () => ipcRenderer.removeListener('ytdlp-updated', listener);
+  },
+  onBackgroundActivity: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('background-activity', listener);
+    return () => ipcRenderer.removeListener('background-activity', listener);
   },
 });

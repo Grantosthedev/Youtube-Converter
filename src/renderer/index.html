@@ -27,7 +27,7 @@
         </div>
         <div id="queueList" class="queue-panel__list"></div>
         <div id="queueEmpty" class="queue-panel__empty visible">
-          <img src="stickers/empty.png" class="queue-panel__empty-icon" alt="" draggable="false">
+          <img src="stickers/empty-queue.png" class="queue-panel__empty-icon" alt="" draggable="false">
           <div class="queue-panel__empty-text">No downloads yet fam, go and steal some videos already</div>
         </div>
       </div>
@@ -40,8 +40,25 @@
     <!-- Meme Sticker -->
     <img id="memeSticker" src="stickers/Default.png" class="sticker" alt="" draggable="false">
 
-    <!-- Path Display (clickable, right-aligned) -->
-    <div id="pathDisplay" class="path-display" title="">~/Downloads/YT Clips</div>
+    <!-- Path + Project row -->
+    <div class="path-row">
+      <div id="pathDisplay" class="path-display" title=""><span class="path-display__label">save to:</span> ~/Downloads/YT Clips</div>
+      <div class="path-row__spacer"></div>
+      <div class="project-anchor">
+        <button id="projectBtn" class="project-btn" aria-label="Set project">+ Project</button>
+        <div id="projectPill" class="project-pill" style="display:none">
+          <span id="projectPillName" class="project-pill__name"></span>
+          <button id="projectPillClear" class="project-pill__clear" aria-label="Clear project">✕</button>
+        </div>
+        <div id="projectDropdown" class="project-dropdown">
+          <input type="text" id="projectInput" class="project-dropdown__input" placeholder="Name this project, fam" spellcheck="false" autocomplete="off" maxlength="50">
+          <div id="projectList" class="project-dropdown__list"></div>
+          <div id="projectHint" class="project-dropdown__hint" style="display:none"></div>
+          <div id="projectEmpty" class="project-dropdown__empty">No projects yet. Type one in, genius.</div>
+        </div>
+      </div>
+    </div>
+    <div id="projectBackdrop" class="project-backdrop"></div>
 
     <!-- Unified URL + Download row -->
     <div class="url-row">
@@ -125,6 +142,12 @@
             <span class="toggle__knob"></span>
           </button>
         </div>
+        <div class="settings-row">
+          <span class="settings-label">Professional Mode</span>
+          <button id="modeToggle" class="toggle" aria-label="Toggle professional mode">
+            <span class="toggle__knob"></span>
+          </button>
+        </div>
         <button id="historyBtn" class="settings-action-btn">History</button>
         <div class="settings-divider"></div>
         <button id="appUpdateBtn" class="settings-action-btn settings-app-update" style="display:none">Update Available</button>
@@ -132,6 +155,29 @@
           <button id="updateYtdlpBtn" class="settings-update-btn">Update</button>
           <span id="appVersion" class="settings-version"></span>
         </div>
+      </div>
+    </div>
+
+    <!-- Help / Supported Services (fixed bottom-left) -->
+    <div class="help-anchor">
+      <button id="helpBtn" class="help-btn" aria-label="Supported services">
+        <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+          <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M7.5 7.5a2.5 2.5 0 0 1 4.85.83c0 1.67-2.5 2.5-2.5 2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="10" cy="14.5" r="0.75" fill="currentColor"/>
+        </svg>
+      </button>
+      <div id="helpPopover" class="help-popover">
+        <span class="help-popover__heading">Supported Services</span>
+        <div class="help-popover__chips">
+          <span class="help-chip">youtube</span>
+          <span class="help-chip">youtube shorts</span>
+          <span class="help-chip">instagram</span>
+          <span class="help-chip">instagram photos</span>
+          <span class="help-chip">tiktok</span>
+          <span class="help-chip help-chip--secret" id="yaMumChip" style="display:none">ya mum</span>
+        </div>
+        <span class="help-popover__disclaimer">support for a service does not imply affiliation, endorsement, or any form of support other than technical compatibility.</span>
       </div>
     </div>
 
@@ -155,6 +201,12 @@
     <button id="statusRetry" class="status-action-btn" style="display:none">Retry</button>
   </div>
 
+  <!-- Activity Toast (subtle bottom-center background task indicator) -->
+  <div id="activityToast" class="activity-toast">
+    <span class="activity-toast__spinner"></span>
+    <span class="activity-toast__text" id="activityText"></span>
+  </div>
+
   <!-- History View (full-screen overlay, outside .app) -->
   <div id="historyView" class="history-view">
     <div class="history-header">
@@ -176,6 +228,10 @@
         <button class="history-filter" data-filter="video">Video</button>
         <button class="history-filter" data-filter="audio">Audio</button>
         <button class="history-filter" data-filter="image">Image</button>
+        <div class="history-project-filter" id="historyProjectFilter" style="display:none">
+          <button id="historyProjectBtn" class="history-filter history-project-filter-btn">All Projects ▾</button>
+          <div id="historyProjectMenu" class="history-project-menu"></div>
+        </div>
       </div>
     </div>
 
@@ -187,7 +243,7 @@
     <div id="historyList" class="history-list"></div>
 
     <div id="historyEmpty" class="history-empty">
-      <img src="stickers/empty.png" class="history-empty__sticker" alt="" draggable="false">
+      <img src="stickers/empty-queue.png" class="history-empty__sticker" alt="" draggable="false">
       <span>No downloads yet. Go download something.</span>
     </div>
   </div>
