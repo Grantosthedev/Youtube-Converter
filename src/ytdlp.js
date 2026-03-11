@@ -56,14 +56,26 @@ function fetchVideoInfo(url, platform) {
     ];
 
     const timeout = platform === 'instagram' ? 60000 : platform === 'tiktok' ? 45000 : 30000;
-    const proc = spawn(ytdlp, args, { timeout });
+    const proc = spawn(ytdlp, args);
     let stdout = '';
     let stderr = '';
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill('SIGTERM');
+      setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 3000);
+    }, timeout);
 
     proc.stdout.on('data', (data) => { stdout += data.toString(); });
     proc.stderr.on('data', (data) => { stderr += data.toString(); });
 
     proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) {
+        reject(new Error('Request timed out. Check your connection and try again.'));
+        return;
+      }
       if (code !== 0) {
         reject(new Error(mapError(stderr)));
         return;
@@ -108,6 +120,7 @@ function fetchVideoInfo(url, platform) {
     });
 
     proc.on('error', (err) => {
+      clearTimeout(timer);
       reject(new Error(`Failed to run yt-dlp: ${err.message}`));
     });
   });
@@ -119,14 +132,22 @@ function extractAvailableQualities(formats) {
     if (f.height && f.vcodec !== 'none') heights.add(f.height);
   }
   const sorted = [...heights].sort((a, b) => b - a);
-  return sorted.map(h => {
-    if (h >= 2160) return '4K';
-    if (h >= 1440) return '1440p';
-    if (h >= 1080) return '1080p';
-    if (h >= 720) return '720p';
-    if (h >= 480) return '480p';
-    return `${h}p`;
-  });
+  const seen = new Set();
+  const labels = [];
+  for (const h of sorted) {
+    let label;
+    if (h >= 2160) label = '4K';
+    else if (h >= 1440) label = '1440p';
+    else if (h >= 1080) label = '1080p';
+    else if (h >= 720) label = '720p';
+    else if (h >= 480) label = '480p';
+    else label = `${h}p`;
+    if (!seen.has(label)) {
+      seen.add(label);
+      labels.push(label);
+    }
+  }
+  return labels;
 }
 
 function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title, ffmpegDir, platform }) {
@@ -157,7 +178,7 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
     } else {
       args.push(
         '-f',
-        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo+bestaudio',
+        'bestvideo[height>=2160]+bestaudio/bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best',
         '--merge-output-format', 'mp4',
       );
     }
@@ -247,46 +268,81 @@ function ensureMacCompatible(filePath, ffmpegPath, onProgress) {
     probe.stderr.on('data', (d) => { probeOutput += d.toString(); });
 
     probe.on('close', () => {
-      const hasNonH264 = /Video:.*(?:vp[89]|av01|av1)/i.test(probeOutput);
-      const hasH264 = /Video:.*(?:h264|avc)/i.test(probeOutput);
+      const hasNonCompatible = /Video:.*(?:vp[89]|av01|av1)/i.test(probeOutput);
+      const hasCompatible = /Video:.*(?:h264|avc|hevc|h265)/i.test(probeOutput);
 
-      if (!hasNonH264 || hasH264) {
+      if (!hasNonCompatible || hasCompatible) {
         resolve(filePath);
         return;
       }
 
       onProgress({ percent: 98, speed: '', eta: '', status: 'Converting to macOS-compatible format...' });
 
-      const tmpPath = filePath.replace(/\.mp4$/, '.h264.tmp.mp4');
-      const reencode = spawn(ffmpegPath, [
+      const tmpPath = filePath.replace(/\.mp4$/, '.compat.tmp.mp4');
+
+      const hwEncode = spawn(ffmpegPath, [
         '-i', filePath,
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '18',
+        '-c:v', 'hevc_videotoolbox',
+        '-q:v', '55',
+        '-tag:v', 'hvc1',
         '-c:a', 'aac',
         '-movflags', '+faststart',
         '-y',
         tmpPath,
       ]);
 
-      reencode.on('close', (code) => {
-        if (code === 0) {
+      let hwFailed = false;
+
+      hwEncode.on('close', (hwCode) => {
+        if (hwFailed) return;
+        if (hwCode === 0) {
           try {
             fs.unlinkSync(filePath);
             fs.renameSync(tmpPath, filePath);
           } catch { /* keep original if rename fails */ }
           resolve(filePath);
-        } else {
-          try { fs.unlinkSync(tmpPath); } catch {}
-          resolve(filePath);
+          return;
         }
+
+        try { fs.unlinkSync(tmpPath); } catch {}
+        softwareEncode(filePath, ffmpegPath, tmpPath, resolve);
       });
 
-      reencode.on('error', () => resolve(filePath));
+      hwEncode.on('error', () => {
+        hwFailed = true;
+        softwareEncode(filePath, ffmpegPath, tmpPath, resolve);
+      });
     });
 
     probe.on('error', () => resolve(filePath));
   });
+}
+
+function softwareEncode(filePath, ffmpegPath, tmpPath, resolve) {
+  const swEncode = spawn(ffmpegPath, [
+    '-i', filePath,
+    '-c:v', 'libx264',
+    '-preset', 'fast',
+    '-crf', '18',
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
+    '-y',
+    tmpPath,
+  ]);
+
+  swEncode.on('close', (code) => {
+    if (code === 0) {
+      try {
+        fs.unlinkSync(filePath);
+        fs.renameSync(tmpPath, filePath);
+      } catch { /* keep original if rename fails */ }
+    } else {
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
+    resolve(filePath);
+  });
+
+  swEncode.on('error', () => resolve(filePath));
 }
 
 function startDownload(options, onProgress, onComplete, onError) {
@@ -319,7 +375,7 @@ function startDownload(options, onProgress, onComplete, onError) {
   proc.on('close', (code) => {
     if (code === 0) {
       const filePath = parseState.lastFile;
-      if (options.platform === 'instagram' && filePath) {
+      if (filePath && filePath.endsWith('.mp4')) {
         ensureMacCompatible(filePath, ffmpegPath, onProgress)
           .then((finalPath) => onComplete(finalPath));
       } else {

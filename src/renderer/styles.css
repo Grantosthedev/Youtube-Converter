@@ -646,13 +646,11 @@ input, button {
 }
 
 .url-input-clear {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: var(--red-dark);
   color: var(--red-bright);
-  font-size: 17px;
-  line-height: 24px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -665,6 +663,11 @@ input, button {
   transition:
     transform 250ms var(--spring),
     opacity 200ms var(--ease);
+}
+
+.url-input-clear .ui-icon {
+  font-size: 14px;
+  line-height: 1;
 }
 
 .url-input-clear.visible {
@@ -1884,8 +1887,8 @@ input, button {
 }
 
 .history-filter.active {
-  background: var(--red-bright);
-  color: var(--white);
+  background: var(--proj-dark, var(--red-bright));
+  color: var(--proj-bright, var(--white));
 }
 
 .history-filter:not(.active):hover {
@@ -1933,7 +1936,7 @@ input, button {
 /* ---- Entry card ---- */
 
 .history-entry {
-  background: var(--red-dark);
+  background: var(--proj-dark, var(--red-dark));
   border-radius: var(--radius-card);
   overflow: hidden;
   flex-shrink: 0;
@@ -2250,13 +2253,14 @@ input, button {
 .project-pill {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px 0 12px;
   border-radius: var(--radius-pill);
-  background: var(--red-bright);
-  color: var(--white);
+  background: var(--proj-dark, var(--red-dark));
+  color: var(--proj-bright, var(--red-bright));
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   animation: badgePop 300ms var(--spring);
@@ -2266,16 +2270,25 @@ input, button {
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1;
 }
 
 .project-pill__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
-  color: var(--red-dark);
-  font-size: 14px;
+  color: var(--proj-bright, var(--red-bright));
+  font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
-  padding: 0 2px;
+  padding: 0;
+  line-height: 1;
   transition: opacity 150ms var(--ease);
+}
+
+.project-pill__clear .ui-icon {
+  font-size: 12px;
 }
 
 .project-pill__clear:hover {
@@ -2366,11 +2379,13 @@ input, button {
 }
 
 .project-dropdown__item:hover {
-  background: rgba(226,0,0,0.12);
+  background: var(--proj-hover, rgba(226,0,0,0.12));
+  color: var(--proj-bright, var(--white));
 }
 
 .project-dropdown__item.active {
-  background: var(--red-bright);
+  background: var(--proj-dark, var(--red-dark));
+  color: var(--proj-bright, var(--red-bright));
 }
 
 .project-dropdown__item-name {
@@ -2412,8 +2427,8 @@ input, button {
 
 .history-entry__project {
   font-size: 12px;
-  color: var(--red-bright);
-  background: rgba(226,0,0,0.12);
+  color: var(--proj-bright, var(--red-bright));
+  background: var(--proj-subtle, rgba(226,0,0,0.12));
   padding: 3px 10px;
   border-radius: var(--radius-pill);
   flex-shrink: 0;
@@ -2447,7 +2462,7 @@ input, button {
   display: none;
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  right: 0;
   min-width: 160px;
   max-height: 240px;
   overflow-y: auto;
@@ -2483,11 +2498,12 @@ input, button {
 }
 
 .history-project-menu__item:hover {
-  background: rgba(226,0,0,0.12);
+  background: var(--proj-hover, rgba(226,0,0,0.12));
 }
 
 .history-project-menu__item.active {
-  background: var(--red-bright);
+  background: var(--proj-dark, var(--red-bright));
+  color: var(--proj-bright, var(--white));
 }
 
 /* ============================================================

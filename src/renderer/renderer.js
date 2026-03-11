@@ -137,6 +137,23 @@ function isTiktokPhotoUrl(url) {
   return /\/photo\//.test(url.trim());
 }
 
+function getProjectHue(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  // Map to 40–320° to avoid the app's brand red zone (0–40° and 320–360°)
+  return (h % 280) + 40;
+}
+
+function projectColors(name) {
+  const hue = getProjectHue(name);
+  return {
+    bright: `hsl(${hue}, 85%, 48%)`,
+    dark:   `hsl(${hue}, 60%, 13%)`,
+    subtle: `hsla(${hue}, 85%, 48%, 0.15)`,
+    hover:  `hsla(${hue}, 85%, 48%, 0.15)`,
+  };
+}
+
 function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -1775,7 +1792,8 @@ function updateQualityLabels(platform, contentType) {
     buttons[1].classList.remove('collapsed');
     buttons[2].classList.remove('collapsed');
     if (platform === 'youtube' || !platform) {
-      buttons[0].textContent = DEFAULT_QUALITY_LABELS[0];
+      const bestFormat = state.videoInfo?.formats?.[0];
+      buttons[0].textContent = bestFormat ? `Best / ${bestFormat}` : DEFAULT_QUALITY_LABELS[0];
       buttons[1].textContent = DEFAULT_QUALITY_LABELS[1];
       buttons[2].textContent = DEFAULT_QUALITY_LABELS[2];
     } else {
@@ -1871,10 +1889,15 @@ function updatePathDisplay() {
 
 function updateProjectUI() {
   if (state.activeProject) {
+    const c = projectColors(state.activeProject);
+    projectPill.style.setProperty('--proj-bright', c.bright);
+    projectPill.style.setProperty('--proj-dark', c.dark);
     projectBtn.style.display = 'none';
     projectPill.style.display = '';
     projectPillName.textContent = state.activeProject;
   } else {
+    projectPill.style.removeProperty('--proj-bright');
+    projectPill.style.removeProperty('--proj-dark');
     projectBtn.style.display = '';
     projectPill.style.display = 'none';
     projectPillName.textContent = '';
@@ -1937,6 +1960,9 @@ function renderProjectList(filter) {
     const row = document.createElement('button');
     row.className = 'project-dropdown__item';
     if (state.activeProject === name) row.classList.add('active');
+    const c = projectColors(name);
+    row.style.setProperty('--proj-bright', c.bright);
+    row.style.setProperty('--proj-hover', c.hover);
     const count = counts[name] || 0;
     row.innerHTML = `<span class="project-dropdown__item-name">${escapeHtml(name)}</span><span class="project-dropdown__item-count">${count}</span>`;
     row.addEventListener('click', (e) => {
@@ -2242,6 +2268,14 @@ function updateHistoryProjectFilter() {
     ${icon('arrow-down-01', 'ui-icon history-project-filter-btn__icon')}
   `;
   historyProjectBtn.classList.toggle('active', !!state.historyProjectFilter);
+  if (state.historyProjectFilter) {
+    const bc = projectColors(state.historyProjectFilter);
+    historyProjectBtn.style.setProperty('--proj-bright', bc.bright);
+    historyProjectBtn.style.setProperty('--proj-dark', bc.dark);
+  } else {
+    historyProjectBtn.style.removeProperty('--proj-bright');
+    historyProjectBtn.style.removeProperty('--proj-dark');
+  }
 
   historyProjectMenu.innerHTML = '';
   const allItem = document.createElement('button');
@@ -2260,6 +2294,10 @@ function updateHistoryProjectFilter() {
     const item = document.createElement('button');
     item.className = 'history-project-menu__item';
     if (state.historyProjectFilter === name) item.classList.add('active');
+    const c = projectColors(name);
+    item.style.setProperty('--proj-bright', c.bright);
+    item.style.setProperty('--proj-dark', c.dark);
+    item.style.setProperty('--proj-hover', c.hover);
     item.textContent = name;
     item.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2286,6 +2324,12 @@ function createHistoryEntryEl(entry) {
   const el = document.createElement('div');
   el.className = 'history-entry';
   el.dataset.id = entry.id;
+  if (entry.project) {
+    const c = projectColors(entry.project);
+    el.style.setProperty('--proj-dark', c.dark);
+    el.style.setProperty('--proj-bright', c.bright);
+    el.style.setProperty('--proj-subtle', c.subtle);
+  }
 
   const isCarousel = entry.mediaType === 'carousel' && entry.carouselItems?.length > 0;
   const clipInfo = (entry.clipStart && entry.clipStart !== '00:00:00') || (entry.clipEnd && entry.clipEnd !== '00:00:00')

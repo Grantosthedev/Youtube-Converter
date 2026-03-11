@@ -89,15 +89,19 @@ async function getLatestYtdlpVersion() {
   }
 }
 
-async function getCurrentYtdlpVersion() {
+function testBinary(binPath) {
   const { execFile } = require('child_process');
-  const ytdlpPath = getYtdlpPath();
   return new Promise((resolve) => {
-    execFile(ytdlpPath, ['--version'], { timeout: 3000 }, (err, stdout) => {
+    execFile(binPath, ['--version'], { timeout: 5000 }, (err, stdout) => {
       if (err) { resolve(null); return; }
       resolve(stdout.trim());
     });
   });
+}
+
+async function getCurrentYtdlpVersion() {
+  const ytdlpPath = getYtdlpPath();
+  return testBinary(ytdlpPath);
 }
 
 async function updateYtdlp() {
@@ -111,10 +115,20 @@ async function updateYtdlp() {
       fs.copyFileSync(destPath, backupPath);
     }
     await downloadFile(YTDLP_DOWNLOAD_BASE, destPath);
+
+    const version = await testBinary(destPath);
+    if (!version) {
+      console.log('[updater] Downloaded binary failed validation, removing it');
+      try { fs.unlinkSync(destPath); } catch {}
+      if (fs.existsSync(backupPath)) {
+        try { fs.unlinkSync(backupPath); } catch {}
+      }
+      return { success: false, error: 'Downloaded binary blocked by macOS. Using bundled version.' };
+    }
+
     if (fs.existsSync(backupPath)) {
       fs.unlinkSync(backupPath);
     }
-    const version = await getCurrentYtdlpVersion();
     return { success: true, version };
   } catch (err) {
     if (fs.existsSync(backupPath)) {
