@@ -61,6 +61,7 @@ const autoPasteToggle = $('#autoPasteToggle');
 const showInFinderToggle = $('#showInFinderToggle');
 const modeToggle = $('#modeToggle');
 const updateYtdlpBtn = $('#updateYtdlpBtn');
+const updateStatus = $('#updateStatus');
 const appVersion = $('#appVersion');
 const appUpdateBtn = $('#appUpdateBtn');
 const historyBtn = $('#historyBtn');
@@ -271,6 +272,11 @@ const PROFESSIONAL_STRINGS = new Map([
   ['Add new project', 'Add new project'],
   ['No projects yet. Type one in, genius.', 'No projects yet. Enter a name to create one.'],
   ['Hold tight, making sure everything works…', 'Running background checks…'],
+  ['First-time setup — downloading engine…', 'Setting up — downloading engine…'],
+  ['Downloading latest version…', 'Downloading latest version…'],
+  ['Done!', 'Done!'],
+  ['Something went wrong', 'Something went wrong'],
+  ['Couldn\'t reach the server. Check your connection.', 'Could not reach the server. Check your connection.'],
   ['All systems go, baby', 'Ready'],
 ]);
 
@@ -1739,7 +1745,9 @@ window.api.onYtdlpUpdated((version) => {
 
 window.api.onBackgroundActivity((data) => {
   if (data.type === 'ytdlp-check') {
-    if (data.status === 'checking') {
+    if (data.status === 'downloading') {
+      showActivityToast(t('First-time setup — downloading engine…'));
+    } else if (data.status === 'checking') {
       showActivityToast(t('Hold tight, making sure everything works…'));
     } else if (data.status === 'updated') {
       completeActivityToast(t('All systems go, baby'));
@@ -2157,15 +2165,22 @@ updateYtdlpBtn.addEventListener('click', async (e) => {
   updateYtdlpBtn.disabled = true;
   updateYtdlpBtn.textContent = t('Updating…');
   updateYtdlpBtn.classList.add('updating');
+  updateStatus.textContent = t('Downloading latest version…');
+  updateStatus.className = 'update-status';
   try {
     const result = await window.api.updateYtdlp();
     if (result.success) {
+      updateStatus.textContent = t('Done!');
+      updateStatus.className = 'update-status success';
       showStatus('success', tp('ytdlpUpdated', result.version) || `Download engine updated to ${result.version}, let's go!`);
+      setTimeout(() => { updateStatus.textContent = ''; }, 4000);
     } else {
-      showStatus('error', tp('ytdlpUpdateFailed', result.error) || `Update failed: ${result.error} - what did you expect, you dim bulb?`);
+      updateStatus.textContent = result.error || t('Something went wrong');
+      updateStatus.className = 'update-status error';
     }
   } catch (err) {
-    showStatus('error', t('Failed to update download engine, what the helly!'));
+    updateStatus.textContent = t('Couldn\'t reach the server. Check your connection.');
+    updateStatus.className = 'update-status error';
   } finally {
     updateYtdlpBtn.disabled = false;
     updateYtdlpBtn.textContent = t('Update');

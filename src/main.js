@@ -183,7 +183,7 @@ function createWindow() {
 
 ipcMain.handle('fetch-video-info', async (_event, url) => {
   if (ytdlpUpdatePromise) {
-    await Promise.race([ytdlpUpdatePromise, new Promise(r => setTimeout(r, 1500))]);
+    await ytdlpUpdatePromise;
   }
   if (!isValidURL(url)) {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
@@ -210,7 +210,7 @@ const TIME_FORMAT = /^\d{2}:\d{2}:\d{2}$/;
 
 ipcMain.handle('start-download', async (event, options) => {
   if (ytdlpUpdatePromise) {
-    await Promise.race([ytdlpUpdatePromise, new Promise(r => setTimeout(r, 1500))]);
+    await ytdlpUpdatePromise;
   }
   if (!options || typeof options !== 'object') {
     throw new Error('Invalid download options, you inept noodle.');
@@ -729,16 +729,6 @@ ipcMain.handle('open-external', async (_event, url) => {
 
 app.on('ready', () => {
   app.setName('DL Buddy');
-
-  const ytdlpOk = binaryExists(getYtdlpPath());
-  if (!ytdlpOk) {
-    dialog.showErrorBox(
-      'Missing Binary, You Buffoon',
-      'yt-dlp binary is missing, you inept noodle. Please reinstall the app or run "npm run postinstall".',
-    );
-    app.quit();
-    return;
-  }
   createWindow();
 
   const sendActivity = (data) => {
@@ -749,10 +739,28 @@ app.on('ready', () => {
 
   let activityNotified = false;
   let pendingActivityResult = null;
+  const needsInitialDownload = !binaryExists(getYtdlpPath());
 
-  ytdlpUpdatePromise = ensureYtdlpFresh(store).then((result) => {
-    if (result && result.success && !result.skipped) {
-      console.log(`[startup] yt-dlp auto-updated to ${result.version}`);
+  ytdlpUpdatePromise = (async () => {
+    if (needsInitialDownload) {
+      console.log('[startup] yt-dlp not found, downloading...');
+      sendActivity({ type: 'ytdlp-check', status: 'downloading' });
+      const result = await updateYtdlp();
+      if (!result.success) {
+        dialog.showErrorBox(
+          'Setup Failed',
+          `Could not download yt-dlp: ${result.error}\n\nCheck your internet connection and restart the app.`,
+        );
+        app.quit();
+        return null;
+      }
+      return result;
+    }
+    return ensureYtdlpFresh(store);
+  })().then((result) => {
+    if (!result) return;
+    if (result.success && !result.skipped) {
+      console.log(`[startup] yt-dlp ready: ${result.version}`);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('ytdlp-updated', result.version);
       }
@@ -771,7 +779,7 @@ app.on('ready', () => {
   mainWindow.webContents.once('did-finish-load', () => {
     if (!pendingActivityResult) {
       activityNotified = true;
-      sendActivity({ type: 'ytdlp-check', status: 'checking' });
+      sendActivity({ type: 'ytdlp-check', status: needsInitialDownload ? 'downloading' : 'checking' });
     }
   });
 });

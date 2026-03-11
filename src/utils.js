@@ -69,6 +69,7 @@ function getYtdlpPath() {
     fs.accessSync(userPath, fs.constants.X_OK);
     return userPath;
   } catch {
+    if (app.isPackaged) return userPath;
     return getResourcePath('bin', 'yt-dlp_macos');
   }
 }

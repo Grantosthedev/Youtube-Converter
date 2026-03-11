@@ -11,9 +11,7 @@ module.exports = {
     name: 'DL Buddy',
     appBundleId: 'com.grantosthedev.dlbuddy',
     icon: path.join(__dirname, 'assets', 'icon'),
-    extraResource: [
-      path.join(__dirname, 'bin'),
-    ],
+    extraResource: [],
     ignore: [
       /^\/bin($|\/)/,
       /^\/assets($|\/)/,

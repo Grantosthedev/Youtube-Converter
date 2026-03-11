@@ -1,5 +1,6 @@
 const https = require('https');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const { getYtdlpPath, getUserBinDir } = require('./utils');
 
 const YTDLP_RELEASES_URL = 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest';
@@ -89,8 +90,15 @@ async function getLatestYtdlpVersion() {
   }
 }
 
+function stripQuarantine(filePath) {
+  return new Promise((resolve) => {
+    execFile('xattr', ['-d', 'com.apple.quarantine', filePath], { timeout: 3000 }, () => {
+      resolve();
+    });
+  });
+}
+
 function testBinary(binPath) {
-  const { execFile } = require('child_process');
   return new Promise((resolve) => {
     execFile(binPath, ['--version'], { timeout: 5000 }, (err, stdout) => {
       if (err) { resolve(null); return; }
@@ -115,6 +123,7 @@ async function updateYtdlp() {
       fs.copyFileSync(destPath, backupPath);
     }
     await downloadFile(YTDLP_DOWNLOAD_BASE, destPath);
+    await stripQuarantine(destPath);
 
     const version = await testBinary(destPath);
     if (!version) {
@@ -123,7 +132,7 @@ async function updateYtdlp() {
       if (fs.existsSync(backupPath)) {
         try { fs.unlinkSync(backupPath); } catch {}
       }
-      return { success: false, error: 'Downloaded binary blocked by macOS. Using bundled version.' };
+      return { success: false, error: 'Downloaded file was blocked by macOS. Try again or restart the app.' };
     }
 
     if (fs.existsSync(backupPath)) {

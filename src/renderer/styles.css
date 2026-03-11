@@ -1432,6 +1432,27 @@ input, button {
   text-align: right;
 }
 
+.update-status {
+  display: block;
+  font-size: 11px;
+  color: var(--grey-muted);
+  padding: 0 4px;
+  min-height: 16px;
+  transition: opacity 300ms ease;
+}
+
+.update-status:empty {
+  display: none;
+}
+
+.update-status.error {
+  color: var(--color-error);
+}
+
+.update-status.success {
+  color: var(--color-success);
+}
+
 /* ============================================================
    Help / Supported Services — Fixed bottom-left
    ============================================================ */
