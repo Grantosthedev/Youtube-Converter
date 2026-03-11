@@ -63,14 +63,27 @@ function getUserBinDir() {
   return path.join(app.getPath('userData'), 'bin');
 }
 
+function getBundledYtdlpPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'yt-dlp_macos.gz');
+  }
+  return path.join(__dirname, '..', 'bin', 'yt-dlp_macos.gz');
+}
+
 function getYtdlpPath() {
   const userPath = path.join(getUserBinDir(), 'yt-dlp_macos');
   try {
     fs.accessSync(userPath, fs.constants.X_OK);
     return userPath;
   } catch {
-    if (app.isPackaged) return userPath;
-    return getResourcePath('bin', 'yt-dlp_macos');
+    if (!app.isPackaged) {
+      const devPath = path.join(__dirname, '..', 'bin', 'yt-dlp_macos');
+      try {
+        fs.accessSync(devPath, fs.constants.X_OK);
+        return devPath;
+      } catch {}
+    }
+    return userPath;
   }
 }
 
@@ -132,6 +145,7 @@ module.exports = {
   normalizeYouTubeURL,
   sanitizeFilename,
   getYtdlpPath,
+  getBundledYtdlpPath,
   getUserBinDir,
   getFfmpegPath,
   getResourcePath,

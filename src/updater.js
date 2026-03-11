@@ -1,7 +1,9 @@
 const https = require('https');
 const fs = require('fs');
+const zlib = require('zlib');
 const { execFile } = require('child_process');
-const { getYtdlpPath, getUserBinDir } = require('./utils');
+const path = require('path');
+const { getYtdlpPath, getUserBinDir, getBundledYtdlpPath } = require('./utils');
 
 const YTDLP_RELEASES_URL = 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest';
 const YTDLP_DOWNLOAD_BASE = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
@@ -90,18 +92,49 @@ async function getLatestYtdlpVersion() {
   }
 }
 
-function stripQuarantine(filePath) {
-  return new Promise((resolve) => {
-    execFile('xattr', ['-d', 'com.apple.quarantine', filePath], { timeout: 3000 }, () => {
-      resolve();
+function execPromise(bin, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(bin, args, { timeout: 5000, ...opts }, (err, stdout, stderr) => {
+      if (err) reject(Object.assign(err, { stderr }));
+      else resolve(stdout);
     });
   });
 }
 
+async function stripQuarantine(filePath) {
+  try {
+    await execPromise('/usr/bin/xattr', ['-d', 'com.apple.quarantine', filePath]);
+    console.log('[updater] Removed quarantine attribute');
+  } catch (err) {
+    console.log('[updater] xattr -d quarantine:', err.message || 'no attribute');
+  }
+
+  try {
+    await execPromise('/usr/bin/xattr', ['-c', filePath]);
+    console.log('[updater] Cleared all extended attributes');
+  } catch (err) {
+    console.log('[updater] xattr -c:', err.message);
+  }
+
+  try {
+    await execPromise('/usr/bin/codesign', ['--force', '--sign', '-', filePath]);
+    console.log('[updater] Ad-hoc signed binary');
+  } catch (err) {
+    console.log('[updater] codesign ad-hoc sign:', err.message);
+  }
+}
+
 function testBinary(binPath) {
   return new Promise((resolve) => {
-    execFile(binPath, ['--version'], { timeout: 5000 }, (err, stdout) => {
-      if (err) { resolve(null); return; }
+    execFile(binPath, ['--version'], { timeout: 30000 }, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[updater] Binary test failed:', err.message);
+        if (err.code) console.error('[updater]   code:', err.code);
+        if (err.signal) console.error('[updater]   signal:', err.signal);
+        if (stderr) console.error('[updater]   stderr:', stderr.substring(0, 500));
+        resolve(null);
+        return;
+      }
       resolve(stdout.trim());
     });
   });
@@ -112,41 +145,104 @@ async function getCurrentYtdlpVersion() {
   return testBinary(ytdlpPath);
 }
 
-async function updateYtdlp() {
+async function initializeYtdlp() {
   const userBinDir = getUserBinDir();
   fs.mkdirSync(userBinDir, { recursive: true });
-  const destPath = require('path').join(userBinDir, 'yt-dlp_macos');
-  const backupPath = destPath + '.backup';
+  const destPath = path.join(userBinDir, 'yt-dlp_macos');
+  const bundledGzPath = getBundledYtdlpPath();
+
+  let hasBundled = false;
+  try {
+    fs.accessSync(bundledGzPath, fs.constants.R_OK);
+    hasBundled = true;
+  } catch {}
+
+  if (!hasBundled) {
+    console.log('[updater] No bundled yt-dlp found, falling back to download');
+    return updateYtdlp();
+  }
 
   try {
-    if (fs.existsSync(destPath)) {
-      fs.copyFileSync(destPath, backupPath);
-    }
-    await downloadFile(YTDLP_DOWNLOAD_BASE, destPath);
+    console.log('[updater] Decompressing bundled yt-dlp to userData...');
+    const compressed = fs.readFileSync(bundledGzPath);
+    const decompressed = zlib.gunzipSync(compressed);
+    fs.writeFileSync(destPath, decompressed);
+    fs.chmodSync(destPath, 0o755);
     await stripQuarantine(destPath);
 
     const version = await testBinary(destPath);
-    if (!version) {
-      console.log('[updater] Downloaded binary failed validation, removing it');
+    if (version) {
+      console.log(`[updater] Bundled yt-dlp ready: v${version}`);
+      return { success: true, version };
+    }
+
+    console.log('[updater] Bundled binary failed validation, trying download');
+    return updateYtdlp();
+  } catch (err) {
+    console.error('[updater] Failed to initialize from bundle:', err.message);
+    return updateYtdlp();
+  }
+}
+
+async function updateYtdlp() {
+  const userBinDir = getUserBinDir();
+  fs.mkdirSync(userBinDir, { recursive: true });
+  const destPath = path.join(userBinDir, 'yt-dlp_macos');
+  const backupPath = destPath + '.backup';
+
+  const MAX_ATTEMPTS = 2;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      if (attempt === 1 && fs.existsSync(destPath)) {
+        fs.copyFileSync(destPath, backupPath);
+      }
+
+      console.log(`[updater] Download attempt ${attempt}/${MAX_ATTEMPTS}`);
+      await downloadFile(YTDLP_DOWNLOAD_BASE, destPath);
+
+      const stat = fs.statSync(destPath);
+      console.log(`[updater] Downloaded file size: ${stat.size} bytes`);
+      if (stat.size < 1000) {
+        const content = fs.readFileSync(destPath, 'utf8').substring(0, 200);
+        console.error('[updater] File too small, contents:', content);
+        throw new Error('Downloaded file is too small – may be an error page');
+      }
+
+      fs.chmodSync(destPath, 0o755);
+      await stripQuarantine(destPath);
+
+      const version = await testBinary(destPath);
+      if (version) {
+        console.log(`[updater] Binary validated: v${version}`);
+        try { fs.unlinkSync(backupPath); } catch {}
+        return { success: true, version };
+      }
+
+      console.log(`[updater] Binary validation failed on attempt ${attempt}`);
+      if (attempt < MAX_ATTEMPTS) continue;
+
       try { fs.unlinkSync(destPath); } catch {}
       if (fs.existsSync(backupPath)) {
         try { fs.unlinkSync(backupPath); } catch {}
       }
-      return { success: false, error: 'Downloaded file was blocked by macOS. Try again or restart the app.' };
-    }
+      return {
+        success: false,
+        error: 'yt-dlp binary could not be executed after downloading. '
+          + 'macOS may be blocking it. Try opening System Settings → Privacy & Security '
+          + 'and clicking "Allow Anyway", then restart the app.',
+      };
+    } catch (err) {
+      console.error(`[updater] Attempt ${attempt} error:`, err.message);
+      if (attempt < MAX_ATTEMPTS) continue;
 
-    if (fs.existsSync(backupPath)) {
-      fs.unlinkSync(backupPath);
+      if (fs.existsSync(backupPath)) {
+        try {
+          fs.copyFileSync(backupPath, destPath);
+          fs.unlinkSync(backupPath);
+        } catch { /* backup restore failed too */ }
+      }
+      return { success: false, error: err.message };
     }
-    return { success: true, version };
-  } catch (err) {
-    if (fs.existsSync(backupPath)) {
-      try {
-        fs.copyFileSync(backupPath, destPath);
-        fs.unlinkSync(backupPath);
-      } catch { /* backup restore failed too */ }
-    }
-    return { success: false, error: err.message };
   }
 }
 
@@ -220,6 +316,7 @@ async function checkAppUpdate(currentVersion) {
 module.exports = {
   getLatestYtdlpVersion,
   getCurrentYtdlpVersion,
+  initializeYtdlp,
   updateYtdlp,
   ensureYtdlpFresh,
   checkAppUpdate,

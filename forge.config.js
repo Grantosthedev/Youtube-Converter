@@ -11,7 +11,9 @@ module.exports = {
     name: 'DL Buddy',
     appBundleId: 'com.grantosthedev.dlbuddy',
     icon: path.join(__dirname, 'assets', 'icon'),
-    extraResource: [],
+    extraResource: [
+      path.join(__dirname, 'bin', 'yt-dlp_macos.gz'),
+    ],
     ignore: [
       /^\/bin($|\/)/,
       /^\/assets($|\/)/,

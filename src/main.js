@@ -4,8 +4,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Store = require('electron-store');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos } = require('./ytdlp');
-const { updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, ensureYtdlpFresh } = require('./updater');
-const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
+const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, ensureYtdlpFresh } = require('./updater');
+const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri } = require('./media-fetcher');
 
 const GOOD_STICKERS = [
@@ -743,13 +743,14 @@ app.on('ready', () => {
 
   ytdlpUpdatePromise = (async () => {
     if (needsInitialDownload) {
-      console.log('[startup] yt-dlp not found, downloading...');
+      console.log('[startup] yt-dlp not found in userData, initializing...');
       sendActivity({ type: 'ytdlp-check', status: 'downloading' });
-      const result = await updateYtdlp();
+      const result = await initializeYtdlp();
       if (!result.success) {
+        console.error('[startup] yt-dlp initialization failed:', result.error);
         dialog.showErrorBox(
           'Setup Failed',
-          `Could not download yt-dlp: ${result.error}\n\nCheck your internet connection and restart the app.`,
+          `Could not set up yt-dlp: ${result.error}\n\nPlease restart the app. If the problem persists, check your internet connection.`,
         );
         app.quit();
         return null;
