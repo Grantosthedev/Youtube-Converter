@@ -336,7 +336,35 @@ function icon(name, extraClass = '') {
   return `<i class="${classes}" aria-hidden="true"></i>`;
 }
 
+let urlHintTimer = null;
+
 function setUrlHint(text, showTick = false) {
+  clearTimeout(urlHintTimer);
+
+  if (!text) {
+    urlHint.classList.remove('visible');
+    urlHintTimer = setTimeout(() => {
+      urlHint.textContent = '';
+      urlHint.classList.remove('clipboard');
+    }, 220);
+    return;
+  }
+
+  const wasVisible = urlHint.classList.contains('visible');
+
+  if (wasVisible) {
+    urlHint.classList.remove('visible');
+    urlHintTimer = setTimeout(() => {
+      applyHintContent(text, showTick);
+      requestAnimationFrame(() => urlHint.classList.add('visible'));
+    }, 180);
+  } else {
+    applyHintContent(text, showTick);
+    requestAnimationFrame(() => urlHint.classList.add('visible'));
+  }
+}
+
+function applyHintContent(text, showTick) {
   if (showTick) {
     urlHint.innerHTML = `<span class="url-hint__tick">${icon('tick-01')}</span>${escapeHtml(text)}`;
     urlHint.classList.add('clipboard');
