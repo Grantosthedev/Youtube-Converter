@@ -11,12 +11,11 @@ module.exports = {
     name: 'Downroad',
     appBundleId: 'com.grantosthedev.downroad',
     icon: path.join(__dirname, 'assets', 'icon'),
-    extraResource: [
-      path.join(__dirname, 'bin', 'yt-dlp_macos.gz'),
-    ],
+    extraResource: [],
     ignore: [
       /^\/bin($|\/)/,
       /^\/assets($|\/)/,
+      /^\/build($|\/)/,
       /^\/scripts($|\/)/,
       /^\/out($|\/)/,
       /^\/\.git/,
@@ -28,10 +27,19 @@ module.exports = {
       /\.js\.map$/,
       /\/CHANGELOG(\.md)?$/i,
     ],
-    osxSign: {},
-    // osxNotarize: {
-    //   keychainProfile: 'Downroad'
-    // }
+    osxSign: {
+      identity: 'Developer ID Application: Grant Jenkins (89SDQA6945)',
+      hardenedRuntime: true,
+      entitlements: path.join(__dirname, 'build', 'entitlements.plist'),
+      entitlementsInherit: path.join(__dirname, 'build', 'entitlements.inherit.plist'),
+      signatureFlags: ['library'],
+    },
+    osxNotarize: {
+      tool: 'notarytool',
+      appleId: process.env.APPLE_ID,
+      appleIdPassword: process.env.APPLE_ID_PASSWORD,
+      teamId: process.env.APPLE_TEAM_ID,
+    }
   },
   rebuildConfig: {},
   makers: [

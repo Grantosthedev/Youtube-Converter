@@ -1,0 +1,36 @@
+---
+description: Bump the version in package.json when features, fixes, or breaking changes are completed
+globs: package.json
+alwaysApply: false
+---
+
+# Version Bumping
+
+The single source of truth for the app version is the `version` field in `package.json`. Electron reads it at runtime via `app.getVersion()`. There is no other file to update.
+
+## When to Bump
+
+Bump the version **after completing** a user-requested change, not before starting work. Apply semver (`MAJOR.MINOR.PATCH`):
+
+| Change type | Bump | Example |
+|---|---|---|
+| New feature, new UI surface, new platform support | **minor** | 1.1.0 -> 1.2.0 |
+| Bug fix, typo, performance tweak, dependency update | **patch** | 1.1.0 -> 1.1.1 |
+| Breaking change to saved data, config format, or removed feature | **major** | 1.1.0 -> 2.0.0 |
+
+## When NOT to Bump
+
+- Refactors with no user-visible change
+- Comment or docs-only edits
+- Build config or CI changes (unless they affect the distributed app version)
+- Changes the user explicitly says are WIP or experimental
+
+## How
+
+Edit the `version` field in `package.json` directly. Example:
+
+```json
+"version": "1.2.0"
+```
+
+Always reset the lower segments when bumping a higher one (minor bump: patch -> 0, major bump: minor and patch -> 0).
