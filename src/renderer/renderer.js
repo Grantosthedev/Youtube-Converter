@@ -336,6 +336,16 @@ function icon(name, extraClass = '') {
   return `<i class="${classes}" aria-hidden="true"></i>`;
 }
 
+function setUrlHint(text, showTick = false) {
+  if (showTick) {
+    urlHint.innerHTML = `<span class="url-hint__tick">${icon('tick-01')}</span>${escapeHtml(text)}`;
+    urlHint.classList.add('clipboard');
+  } else {
+    urlHint.textContent = text;
+    urlHint.classList.remove('clipboard');
+  }
+}
+
 /* ============================================================
    Professional / Unhinged Mode — string translations
    ============================================================ */
@@ -576,6 +586,7 @@ function applyQueueItemProjectColors(el) {
   el.style.setProperty('--proj-bright', c.bright);
   el.style.setProperty('--proj-bright-sub', c.brightSub);
   el.style.setProperty('--proj-subtle', c.subtle);
+  el.style.setProperty('--proj-pill-text', c.pillText);
   el.style.setProperty('--proj-light-bg', c.lightBg);
   el.style.setProperty('--proj-light-text', c.lightText);
 }
@@ -587,12 +598,16 @@ function addDownloadToQueue(id, title, quality) {
     filePath: '', error: '',
   });
 
+  const projectBadge = state.activeProject
+    ? `<span class="queue-item__project">${escapeHtml(state.activeProject)}</span>` : '';
+
   const el = document.createElement('div');
   el.className = 'queue-item preparing';
   el.dataset.id = id;
   el.innerHTML = `
     <div class="queue-item__row">
       <span class="queue-item__title">${escapeHtml(title)}</span>
+      ${projectBadge}
       <button class="queue-item__action" aria-label="Cancel">${icon('cancel-01', 'ui-icon')}</button>
     </div>
     <div class="queue-item__bar">
@@ -1146,8 +1161,7 @@ async function handleUrlChange() {
   if (!platform) {
     urlRow.classList.add('error');
     shakeElement(urlRow);
-    urlHint.textContent = '';
-    urlHint.classList.remove('clipboard');
+    setUrlHint('');
     resetVideoState();
     return;
   }
@@ -1170,8 +1184,7 @@ async function handleUrlChange() {
       endTime.disabled = true;
       hideCarousel();
     }
-    urlHint.textContent = t('Ready: click Instant Download');
-    urlHint.classList.add('clipboard');
+    setUrlHint(t('Ready: click Instant Download'), true);
     updateDownloadBtnState();
     return;
   }
@@ -1191,8 +1204,7 @@ async function fetchInfo(url) {
   hideCarousel();
   startTime.classList.remove('auto-filled');
 
-  urlHint.textContent = t('Scanning the goddamn link...');
-  urlHint.classList.remove('clipboard');
+  setUrlHint(t('Scanning the goddamn link...'));
   downloadBtn.textContent = t('Download This Shit');
 
   videoCard.className = 'video-card visible loading';
@@ -1242,12 +1254,10 @@ async function fetchInfo(url) {
     updateQualityLabels(info.platform, info.mediaType);
     updateDownloadBtnState();
 
-    urlHint.textContent = t('Locked in. Ready to rip.');
-    urlHint.classList.add('clipboard');
+    setUrlHint(t('Locked in. Ready to rip.'), true);
     setTimeout(() => {
-      if (urlHint.textContent === t('Locked in. Ready to rip.')) {
-        urlHint.textContent = '';
-        urlHint.classList.remove('clipboard');
+      if (urlHint.textContent.includes(t('Locked in. Ready to rip.'))) {
+        setUrlHint('');
       }
     }, 3000);
   } catch (err) {
@@ -1258,7 +1268,7 @@ async function fetchInfo(url) {
     statusRetry.style.display = '';
     updateDownloadBtnState();
 
-    urlHint.textContent = '';
+    setUrlHint('');
   } finally {
     state.isFetchingInfo = false;
     updateDownloadBtnState();
@@ -1298,8 +1308,7 @@ async function fetchInstagramContent(url) {
   statusRetry.style.display = 'none';
   hideCarousel();
 
-  urlHint.textContent = t('Checking Instagram post...');
-  urlHint.classList.remove('clipboard');
+  setUrlHint(t('Checking Instagram post...'));
   updateDownloadBtnState();
 
   try {
@@ -1309,8 +1318,7 @@ async function fetchInstagramContent(url) {
       if (mediaInfo.isCarousel && mediaInfo.items.length > 1) {
         showCarouselPicker(mediaInfo, url);
         updateQualityLabels('instagram', 'carousel');
-        urlHint.textContent = t('Select items to download');
-        urlHint.classList.add('clipboard');
+        setUrlHint(t('Select items to download'), true);
 
         if (!mediaInfo.items.some(i => i.type === 'video')) {
           fetchAndMergeCarouselVideos(url);
@@ -1323,15 +1331,13 @@ async function fetchInstagramContent(url) {
       if (singleItem.type === 'video') {
         showSingleVideoCard(mediaInfo, url);
         updateQualityLabels('instagram', 'video');
-        urlHint.textContent = t('Reel ready to download');
-        urlHint.classList.add('clipboard');
+        setUrlHint(t('Reel ready to download'), true);
         return;
       }
 
       showSingleImageCard(mediaInfo, url);
       updateQualityLabels('instagram', 'image');
-      urlHint.textContent = t('Image ready to download');
-      urlHint.classList.add('clipboard');
+      setUrlHint(t('Image ready to download'), true);
       return;
     }
 
@@ -1366,8 +1372,7 @@ function fetchAndMergeCarouselVideos(url) {
     }
 
     updateCarouselCount();
-    urlHint.textContent = `Found ${videos.length} video${videos.length > 1 ? 's' : ''} · ${total} items total`;
-    urlHint.classList.add('clipboard');
+    setUrlHint(`Found ${videos.length} video${videos.length > 1 ? 's' : ''} · ${total} items total`, true);
   }).catch(() => { /* yt-dlp failed silently, images-only carousel is fine */ });
 }
 
@@ -2098,14 +2103,12 @@ window.api.onWindowFocus(async () => {
       urlInput.value = text;
       const platform = detectPlatform(text);
       const platformName = platform ? platform.charAt(0).toUpperCase() + platform.slice(1) : '';
-      urlHint.textContent = `${platformName} link detected in clipboard`;
-      urlHint.classList.add('clipboard');
+      setUrlHint(`${platformName} link detected in clipboard`, true);
       handleUrlChange();
 
       setTimeout(() => {
         if (urlHint.textContent.includes('detected in clipboard')) {
-          urlHint.textContent = '';
-          urlHint.classList.remove('clipboard');
+          setUrlHint('');
         }
       }, 4000);
     }
@@ -2436,8 +2439,7 @@ urlClear.addEventListener('click', () => {
   clearTimeout(fetchDebounce);
   state.isFetchingInfo = false;
   urlInput.value = '';
-  urlHint.textContent = '';
-  urlHint.classList.remove('clipboard');
+  setUrlHint('');
   urlRow.classList.remove('error');
   resetVideoState();
   hideStatus();

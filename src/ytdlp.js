@@ -207,7 +207,7 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
     } else {
       args.push(
         '-f',
-        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best',
+        'bestvideo+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best',
         '--merge-output-format', 'mp4',
       );
     }
