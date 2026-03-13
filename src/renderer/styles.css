@@ -675,11 +675,16 @@ input, button {
 .url-input {
   flex: 1;
   height: 56px;
-  padding: 0 0 0 28px;
+  padding: 0 10px 0 28px;
   background: transparent;
   color: var(--white);
   font-size: 14px;
   min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.url-input:focus {
+  text-overflow: clip;
 }
 
 .url-input::placeholder {
@@ -863,6 +868,12 @@ input, button {
   flex-shrink: 0;
 }
 
+.time-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .time-input {
   width: 112px;
   height: 48px;
@@ -907,6 +918,43 @@ input, button {
 .time-input:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.time-input-clear {
+  position: absolute;
+  right: 7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--red-bright);
+  color: var(--red-dark);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.5);
+  transition:
+    transform 200ms var(--spring),
+    opacity 200ms var(--ease);
+}
+
+.time-input-clear .ui-icon {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.time-input.has-value ~ .time-input-clear {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.time-input:disabled ~ .time-input-clear {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.5);
 }
 
 .clip-range__separator {
@@ -3409,6 +3457,11 @@ html.light-mode .url-hint.clipboard {
 
 html.light-mode .clip-range__separator {
   color: #555555;
+}
+
+html.light-mode .time-input-clear {
+  background: var(--red-bright);
+  color: #fff;
 }
 
 /* Logo is all-red — no backing pill needed in light mode */

@@ -39,13 +39,13 @@
 
     <!-- Path + Project row -->
     <div class="path-row">
-      <div id="pathDisplay" class="path-display" title=""><span class="path-display__label">save to:</span> ~/Downloads/YT Clips</div>
+      <div id="pathDisplay" class="path-display" title="" data-tooltip="Click to change your save folder."><span class="path-display__label">save to:</span> ~/Downloads/YT Clips</div>
       <div class="path-row__spacer"></div>
       <div class="project-anchor">
-        <button id="projectBtn" class="project-btn" aria-label="Set project">+ Project</button>
+        <button id="projectBtn" class="project-btn" aria-label="Set project" data-tooltip="Group your downloads into named projects.">+ Project</button>
         <div id="projectPill" class="project-pill" style="display:none">
           <span id="projectPillName" class="project-pill__name"></span>
-          <button id="projectPillClear" class="project-pill__clear" aria-label="Clear project"><i class="hgi-stroke hgi-cancel-01 ui-icon ui-icon--xs" aria-hidden="true"></i></button>
+          <button id="projectPillClear" class="project-pill__clear" aria-label="Clear project" data-tooltip="Clear active project."><i class="hgi-stroke hgi-cancel-01 ui-icon ui-icon--xs" aria-hidden="true"></i></button>
         </div>
         <div id="projectDropdown" class="project-dropdown">
           <input type="text" id="projectInput" class="project-dropdown__input" placeholder="Name this project, fam" spellcheck="false" autocomplete="off" maxlength="50">
@@ -76,9 +76,15 @@
     <!-- Controls row: time range (left) + quality selector (right) -->
     <div class="controls-row">
       <div class="clip-range">
-        <input type="text" id="startTime" class="time-input" placeholder="00:00:00" value="00:00:00" disabled>
+        <div class="time-input-wrap" id="startTimeWrap" data-tooltip="Clip start. Paste a YouTube link to enable.">
+          <input type="text" id="startTime" class="time-input" placeholder="00:00:00" value="00:00:00" disabled>
+          <button id="startTimeClear" class="time-input-clear" aria-label="Clear start time" tabindex="-1"><i class="hgi-stroke hgi-cancel-01 ui-icon" aria-hidden="true"></i></button>
+        </div>
         <span class="clip-range__separator">to</span>
-        <input type="text" id="endTime" class="time-input" placeholder="00:00:00" value="00:00:00" disabled>
+        <div class="time-input-wrap" id="endTimeWrap" data-tooltip="Clip end. Paste a YouTube link to enable.">
+          <input type="text" id="endTime" class="time-input" placeholder="00:00:00" value="00:00:00" disabled>
+          <button id="endTimeClear" class="time-input-clear" aria-label="Clear end time" tabindex="-1"><i class="hgi-stroke hgi-cancel-01 ui-icon" aria-hidden="true"></i></button>
+        </div>
       </div>
       <div class="quality-anchor">
         <div id="qualitySelector" class="quality-bar">
@@ -174,7 +180,7 @@
         <div class="settings-divider"></div>
         <button id="appUpdateBtn" class="settings-action-btn settings-app-update" style="display:none">Update Available</button>
         <div class="settings-row">
-          <button id="updateYtdlpBtn" class="settings-update-btn">Update</button>
+          <button id="updateYtdlpBtn" class="settings-update-btn" data-tooltip="Update the download engine (yt-dlp) to the latest version.">Update</button>
           <span id="appVersion" class="settings-version"></span>
         </div>
         <span id="updateStatus" class="update-status"></span>
@@ -260,13 +266,13 @@
     <div class="history-sort-row">
       <span id="historyCount" class="history-count">0 downloads</span>
       <div class="history-view-toggles">
-        <button class="history-view-btn active" data-view="list" aria-label="List view">
+        <button class="history-view-btn active" data-view="list" aria-label="List view" data-tooltip="List view">
           <i class="hgi-stroke hgi-list-view ui-icon" aria-hidden="true"></i>
         </button>
-        <button class="history-view-btn" data-view="grid" aria-label="Grid view">
+        <button class="history-view-btn" data-view="grid" aria-label="Grid view" data-tooltip="Grid view">
           <i class="hgi-stroke hgi-grid-view ui-icon" aria-hidden="true"></i>
         </button>
-        <button class="history-view-btn" data-view="compact" aria-label="Compact view">
+        <button class="history-view-btn" data-view="compact" aria-label="Compact view" data-tooltip="Compact view">
           <i class="hgi-stroke hgi-menu-01 ui-icon" aria-hidden="true"></i>
         </button>
       </div>

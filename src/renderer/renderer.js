@@ -51,6 +51,10 @@ const videoMeta = $('#videoMeta');
 const videoQualities = $('#videoQualities');
 const startTime = $('#startTime');
 const endTime = $('#endTime');
+const startTimeClear = $('#startTimeClear');
+const endTimeClear = $('#endTimeClear');
+const startTimeWrap = $('#startTimeWrap');
+const endTimeWrap = $('#endTimeWrap');
 const qualitySelector = $('#qualitySelector');
 const pillIndicator = $('#pillIndicator');
 const historyFilterPill = $('#historyFilterPill');
@@ -337,9 +341,29 @@ function icon(name, extraClass = '') {
 }
 
 let urlHintTimer = null;
+let urlHintToken = 0;
+let currentUrlHint = null;
 
-function setUrlHint(text, showTick = false) {
+function resolveUrlHint(hintState) {
+  if (!hintState) return { text: '', showTick: false };
+  if (hintState.kind === 'pool') {
+    return {
+      text: copyFromPool(hintState.key, ...(hintState.args || [])),
+      showTick: !!hintState.showTick,
+    };
+  }
+  return {
+    text: hintState.text || '',
+    showTick: !!hintState.showTick,
+  };
+}
+
+function setUrlHintState(hintState, bumpToken = true) {
   clearTimeout(urlHintTimer);
+  currentUrlHint = hintState;
+  if (bumpToken) urlHintToken += 1;
+
+  const { text, showTick } = resolveUrlHint(hintState);
 
   if (!text) {
     urlHint.classList.remove('visible');
@@ -347,7 +371,7 @@ function setUrlHint(text, showTick = false) {
       urlHint.textContent = '';
       urlHint.classList.remove('clipboard');
     }, 220);
-    return;
+    return urlHintToken;
   }
 
   const wasVisible = urlHint.classList.contains('visible');
@@ -362,6 +386,25 @@ function setUrlHint(text, showTick = false) {
     applyHintContent(text, showTick);
     requestAnimationFrame(() => urlHint.classList.add('visible'));
   }
+
+  return urlHintToken;
+}
+
+function setUrlHint(text, showTick = false) {
+  return setUrlHintState(text ? { kind: 'literal', text, showTick } : null);
+}
+
+function setPooledUrlHint(key, showTick = false, ...args) {
+  return setUrlHintState({ kind: 'pool', key, showTick, args });
+}
+
+function refreshUrlHint() {
+  if (!currentUrlHint) return;
+  setUrlHintState(currentUrlHint, false);
+}
+
+function clearUrlHintIfToken(token) {
+  if (token === urlHintToken) setUrlHint('');
 }
 
 function applyHintContent(text, showTick) {
@@ -477,7 +520,7 @@ function applyMode() {
 
   const queueEmptyText = queueEmpty.querySelector('.queue-panel__empty-text');
   if (queueEmptyText) {
-    queueEmptyText.textContent = t('No downloads yet fam, go and steal some videos already');
+    queueEmptyText.textContent = copyFromPool('queueEmpty');
   }
 
   urlInput.placeholder = t('Hurry up and paste a link, my ninja');
@@ -488,7 +531,7 @@ function applyMode() {
 
   const historyEmptySpan = historyEmpty.querySelector('span');
   if (historyEmptySpan) {
-    historyEmptySpan.textContent = t('No downloads yet. Go download something.');
+    historyEmptySpan.textContent = copyFromPool('historyEmpty');
   }
 
   if (!historyClearBtn.classList.contains('confirm')) {
@@ -507,7 +550,15 @@ function applyMode() {
   }
 
   if (projectEmpty) {
-    projectEmpty.textContent = t('No projects yet. Type one in, genius.');
+    projectEmpty.textContent = copyFromPool('projectEmpty');
+  }
+
+  refreshUrlHint();
+
+  for (const [id, dl] of state.downloads) {
+    if (dl.status !== 'downloading' && dl.status !== 'preparing') {
+      updateQueueItem(id);
+    }
   }
 }
 
@@ -518,6 +569,410 @@ function applyMode() {
 const MAX_CONCURRENT = 5;
 const queueElements = new Map();
 const progressManagers = new Map();
+const UI_COPY_POOLS = {
+  queueComplete: {
+    unhinged: [
+      'Done. Easy money.',
+      'Done. Clean rip.',
+      'Bag secured.',
+      'Saved. No drama.',
+      'Ripped and ready.',
+      'Done. Filthy work.',
+      'Locked in. Saved.',
+      'Done. Absolutely smoked it.',
+      'Saved. Nice and clean.',
+      'Done. Zero nonsense.',
+      'Cooked. Saved.',
+      'Done. Hard carried.',
+      'Done. Smooth as hell.',
+      'Saved. Job done.',
+      'Done. No crumbs.',
+      'Done. Clean as fuck.',
+      'Saved. Solid haul.',
+      'Done. Beautiful filth.',
+      'Ripped. Packed. Done.',
+      'Done. Tight work.',
+      'Saved. No bullshit.',
+      'Done. Fast and filthy.',
+      'Done. Lucky you.',
+      'Saved. We move.',
+      'Done. That shit landed.',
+      'Locked. Loaded. Saved.',
+      'Done. Crisp little haul.',
+      'Saved. Tidy as hell.',
+      'Done. Big win.',
+      'Done. Sharp work.',
+      'Saved. Sexy little file.',
+      'Done. Pure theft.',
+      'Ripped. Bagged. Sorted.',
+      'Done. Neat as hell.',
+      'Saved. No disasters.',
+      'Done. Cooked perfectly.',
+      'Done. Mean little grab.',
+      'Saved. Clean getaway.',
+      'Done. Good shit.',
+    ],
+    professional: [
+      'Download complete.',
+      'Saved successfully.',
+      'All set.',
+      'Saved and ready.',
+      'Download finished.',
+    ],
+  },
+  queueEmpty: {
+    unhinged: [
+      'No downloads yet fam, go and steal some videos already',
+      'Queue is empty. Feed it a goddamn link.',
+      'Nothing in the queue. Fix that.',
+      'Dead quiet in here. Paste a link.',
+    ],
+    professional: [
+      'No downloads yet. Paste a URL to get started.',
+      'Queue is empty. Paste a URL to begin.',
+      'No active downloads. Paste a URL to start.',
+    ],
+  },
+  historyEmpty: {
+    unhinged: [
+      'No downloads yet. Go download something.',
+      'History is empty. Make a mess first.',
+      'Nothing here yet. Rip something.',
+      'No history. Time to fix that.',
+    ],
+    professional: [
+      'No download history yet.',
+      'History is empty.',
+      'No saved download history yet.',
+    ],
+  },
+  projectEmpty: {
+    unhinged: [
+      'No projects yet. Type one in, genius.',
+      'No projects yet. Name something.',
+      'Project list is empty. Start one.',
+      'Nothing here yet. Make a project.',
+    ],
+    professional: [
+      'No projects yet. Enter a name to create one.',
+      'No projects yet. Add a project name to begin.',
+      'Project list is empty. Enter a name to create one.',
+    ],
+  },
+  urlScanning: {
+    unhinged: [
+      'Scanning the goddamn link...',
+      'Checking this sketchy little link...',
+      'Reading the link. Calm down.',
+      'Sniffing the link for trouble...',
+    ],
+    professional: [
+      'Analyzing link...',
+      'Checking link...',
+      'Reading link...',
+      'Inspecting link...',
+    ],
+  },
+  urlReady: {
+    unhinged: [
+      'Locked in. Ready to rip.',
+      'Ready. Hit download.',
+      'Good to go. Rip it.',
+      'Loaded up. Send it.',
+    ],
+    professional: [
+      'Ready to download.',
+      'Download is ready.',
+      'Ready when you are.',
+      'Set. Click download.',
+    ],
+  },
+  instagramCheck: {
+    unhinged: [
+      'Checking Instagram post...',
+      'Digging through the Instagram post...',
+      'Peeking at the Instagram post...',
+      'Checking this Instagram post...',
+    ],
+    professional: [
+      'Checking Instagram post...',
+      'Loading Instagram post...',
+      'Inspecting Instagram post...',
+    ],
+  },
+  carouselSelect: {
+    unhinged: [
+      'Carousel loaded. Pick your loot.',
+      'Items ready. Pick what you want.',
+      'Select the goods to download.',
+      'Carousel ready. Choose your shots.',
+    ],
+    professional: [
+      'Select items to download',
+      'Choose items to download',
+      'Items ready for download',
+    ],
+  },
+  reelReady: {
+    unhinged: [
+      'Reel ready to rip.',
+      'Reel is locked in.',
+      'Reel loaded. Hit download.',
+      'Reel ready.',
+    ],
+    professional: [
+      'Reel ready to download',
+      'Reel is ready',
+      'Reel loaded and ready',
+    ],
+  },
+  imageReady: {
+    unhinged: [
+      'Image ready to rip.',
+      'Image is locked in.',
+      'Image loaded. Hit download.',
+      'Image ready.',
+    ],
+    professional: [
+      'Image ready to download',
+      'Image is ready',
+      'Image loaded and ready',
+    ],
+  },
+  clipboardDetected: {
+    unhinged: [
+      (platformName) => `${platformName} link detected in clipboard`,
+      (platformName) => `${platformName} link found in clipboard`,
+      (platformName) => `Clipboard grabbed a ${platformName} link`,
+      (platformName) => `${platformName} link pulled from clipboard`,
+    ],
+    professional: [
+      (platformName) => `${platformName} link detected in clipboard`,
+      (platformName) => `${platformName} link found in clipboard`,
+      (platformName) => `${platformName} link pasted from clipboard`,
+    ],
+  },
+  downloadSuccessToast: {
+    unhinged: [
+      'Done, you lucky bastard!',
+      'Done. That landed clean.',
+      'Saved. No disasters.',
+      'Done. Bag secured.',
+      'Finished. Good shit.',
+    ],
+    professional: [
+      'Download complete.',
+      'Saved successfully.',
+      'Your download is ready.',
+      'Download finished.',
+    ],
+  },
+  carouselQueueComplete: {
+    unhinged: [
+      (saved, total, failed) => `${saved} of ${total} saved${failed > 0 ? ` (${failed} failed)` : ''}`,
+      (saved, total, failed) => `Saved ${saved} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`,
+      (saved, total, failed) => `${saved} locked in${failed > 0 ? ` · ${failed} failed` : ` · ${total} total`}`,
+    ],
+    professional: [
+      (saved, total, failed) => `${saved} of ${total} saved${failed > 0 ? ` (${failed} failed)` : ''}`,
+      (saved, total, failed) => `Saved ${saved} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`,
+      (saved, total, failed) => `${saved} items saved${failed > 0 ? ` · ${failed} failed` : ''}`,
+    ],
+  },
+  carouselSuccessToast: {
+    unhinged: [
+      (count) => `Downloaded ${count} item${count === 1 ? '' : 's'}.`,
+      (count) => `Saved ${count} item${count === 1 ? '' : 's'}.`,
+      (count) => `${count} item${count === 1 ? '' : 's'} locked in.`,
+    ],
+    professional: [
+      (count) => `Downloaded ${count} item${count === 1 ? '' : 's'}.`,
+      (count) => `Saved ${count} item${count === 1 ? '' : 's'}.`,
+      (count) => `${count} item${count === 1 ? '' : 's'} downloaded.`,
+    ],
+  },
+  carouselPartialToast: {
+    unhinged: [
+      (saved, failed) => `Downloaded ${saved} items. ${failed} failed.`,
+      (saved, failed) => `Saved ${saved} items. ${failed} crashed out.`,
+      (saved, failed) => `${saved} items made it. ${failed} did not.`,
+    ],
+    professional: [
+      (saved, failed) => `Downloaded ${saved} items, ${failed} failed.`,
+      (saved, failed) => `Saved ${saved} items. ${failed} failed.`,
+      (saved, failed) => `${saved} items downloaded. ${failed} failed.`,
+    ],
+  },
+  carouselNotifTitle: {
+    unhinged: [
+      'Carousel done.',
+      'Carousel landed clean.',
+      'Carousel saved.',
+    ],
+    professional: [
+      'Carousel download complete',
+      'Carousel saved',
+      'Carousel complete',
+    ],
+  },
+  carouselPartialTitle: {
+    unhinged: [
+      'Carousel mostly made it',
+      'Carousel partly saved',
+      'Carousel had a wobble',
+    ],
+    professional: [
+      'Carousel partially downloaded',
+      'Carousel partially saved',
+      'Carousel partly complete',
+    ],
+  },
+  carouselFailTitle: {
+    unhinged: [
+      'Carousel fell apart',
+      'Carousel download failed',
+      'Carousel crashed out',
+    ],
+    professional: [
+      'Carousel download failed',
+      'Carousel not saved',
+      'Carousel failed',
+    ],
+  },
+  instantOnToast: {
+    unhinged: [
+      'Instant Download is on: paste it and rip.',
+      'Instant mode on: no scan, just smoke it.',
+      'Instant Download armed: paste and go.',
+    ],
+    professional: [
+      'Instant Downloads enabled: paste a URL and download immediately.',
+      'Instant mode on: URLs download without a scan.',
+      'Instant Downloads enabled.',
+    ],
+  },
+  instantOffToast: {
+    unhinged: [
+      'Instant Download is off: links scan first.',
+      'Preview mode is back: we check links first.',
+      'Instant mode off: scanning comes first again.',
+    ],
+    professional: [
+      'Instant Downloads disabled: links will be scanned first.',
+      'Instant mode off: URLs will be scanned before download.',
+      'Instant Downloads disabled.',
+    ],
+  },
+  modeUnhingedToast: {
+    unhinged: [
+      'Unhinged mode on. Things may get loud.',
+      'Back in Unhinged mode. Good luck.',
+      'Unhinged mode enabled. Brace yourself.',
+    ],
+    professional: [
+      'Unhinged mode enabled.',
+    ],
+  },
+  modeProfessionalToast: {
+    unhinged: [
+      'Professional mode enabled.',
+    ],
+    professional: [
+      'Professional mode enabled.',
+      'Professional mode on.',
+      'Professional mode active.',
+    ],
+  },
+  projectLockedToast: {
+    unhinged: [
+      (name) => `Locked into ${name}. Downloads go there now.`,
+      (name) => `${name} is active now. New downloads land there.`,
+      (name) => `Project set to ${name}. Send downloads there.`,
+    ],
+    professional: [
+      (name) => `Locked into ${name}. Downloads go there now.`,
+      (name) => `Project set to ${name}. New downloads will use it.`,
+      (name) => `${name} is now active for downloads.`,
+    ],
+  },
+  projectClearedToast: {
+    unhinged: [
+      'Project cleared. Back to the main dump.',
+      'Project gone. Back to the default pile.',
+      'No project locked in. Back to default.',
+    ],
+    professional: [
+      'Project cleared. Back to the default location.',
+      'No project selected. Downloads will use the default location.',
+      'Project cleared.',
+    ],
+  },
+  activityChecking: {
+    unhinged: [
+      'Hold tight, making sure everything works...',
+      'Running the usual checks...',
+      'Checking the engine. One sec...',
+    ],
+    professional: [
+      'Running background checks...',
+      'Checking the download engine...',
+      'Validating background setup...',
+    ],
+  },
+  activityDownloadingEngine: {
+    unhinged: [
+      'First-time setup: downloading engine...',
+      'Fetching the download engine...',
+      'Pulling down the engine...',
+    ],
+    professional: [
+      'Setting up: downloading engine...',
+      'Downloading the engine...',
+      'Preparing the download engine...',
+    ],
+  },
+  activityReady: {
+    unhinged: [
+      'All systems go, baby',
+      'Ready to rip.',
+      'Engine locked in.',
+    ],
+    professional: [
+      'Ready',
+      'All set',
+      'Engine ready',
+    ],
+  },
+  engineUpdatedToast: {
+    unhinged: [
+      (version) => `Download engine updated to ${version}.`,
+      (version) => `Engine updated to ${version}. Good shit.`,
+      (version) => `Engine is on ${version} now.`,
+    ],
+    professional: [
+      (version) => `Download engine updated to ${version}.`,
+      (version) => `Engine updated to ${version}.`,
+      (version) => `Download engine is now ${version}.`,
+    ],
+  },
+};
+
+function randomPoolEntry(pool) {
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function copyFromPool(key, ...args) {
+  const group = UI_COPY_POOLS[key];
+  if (!group) return '';
+  const pool = group[state.mode] || group.unhinged;
+  if (!pool || pool.length === 0) return '';
+  const entry = randomPoolEntry(pool);
+  return typeof entry === 'function' ? entry(...args) : entry;
+}
+
+function showStatusFromPool(type, key, ...args) {
+  showStatus(type, copyFromPool(key, ...args));
+}
 
 function createProgressManager(fillEl) {
   let raf = null, current = 0, target = 0, trickle = null, active = false, gotReal = false;
@@ -623,7 +1078,7 @@ function addDownloadToQueue(id, title, quality) {
   state.downloads.set(id, {
     id, title, quality,
     percent: 0, speed: '', status: 'preparing',
-    filePath: '', error: '',
+    filePath: '', error: '', completionLines: {}, completionDetail: null,
   });
 
   const projectBadge = state.activeProject
@@ -661,6 +1116,24 @@ function addDownloadToQueue(id, title, quality) {
 
   updateQueueBadge();
   updateQueueEmpty();
+}
+
+function queueCompletionLine(dl) {
+  if (dl.completionDetail) {
+    dl.completionDetail.lines ||= {};
+    if (!dl.completionDetail.lines[state.mode]) {
+      dl.completionDetail.lines[state.mode] = copyFromPool(
+        dl.completionDetail.key,
+        ...(dl.completionDetail.args || [])
+      );
+    }
+    return dl.completionDetail.lines[state.mode];
+  }
+  dl.completionLines ||= {};
+  if (!dl.completionLines[state.mode]) {
+    dl.completionLines[state.mode] = copyFromPool('queueComplete');
+  }
+  return dl.completionLines[state.mode];
 }
 
 function updateQueueItem(id) {
@@ -710,7 +1183,7 @@ function updateQueueItem(id) {
     case 'complete': {
       fill.className = 'queue-item__fill complete';
       fill.style.width = '100%';
-      detail.innerHTML = icon('checkmark-circle-02', 'ui-icon') + t('Done, you lucky bastard');
+      detail.innerHTML = icon('checkmark-circle-02', 'ui-icon') + escapeHtml(queueCompletionLine(dl));
       if (!el.querySelector('.queue-item__show-file')) {
         const btn = document.createElement('button');
         btn.className = 'queue-item__show-file';
@@ -1232,7 +1705,7 @@ async function fetchInfo(url) {
   hideCarousel();
   startTime.classList.remove('auto-filled');
 
-  setUrlHint(t('Scanning the goddamn link...'));
+  setPooledUrlHint('urlScanning');
   downloadBtn.textContent = t('Download This Shit');
 
   videoCard.className = 'video-card visible loading';
@@ -1278,16 +1751,14 @@ async function fetchInfo(url) {
       }
     }
 
+    updateTimeTooltips();
+
     if (isImage) downloadBtn.textContent = t('Download Image');
     updateQualityLabels(info.platform, info.mediaType);
     updateDownloadBtnState();
 
-    setUrlHint(t('Locked in. Ready to rip.'), true);
-    setTimeout(() => {
-      if (urlHint.textContent.includes(t('Locked in. Ready to rip.'))) {
-        setUrlHint('');
-      }
-    }, 3000);
+    const readyHintToken = setPooledUrlHint('urlReady', true);
+    setTimeout(() => clearUrlHintIfToken(readyHintToken), 3000);
   } catch (err) {
     videoCard.className = 'video-card';
     state.videoInfo = null;
@@ -1307,6 +1778,35 @@ function updateTimeHasValue() {
   const zero = '00:00:00';
   startTime.classList.toggle('has-value', startTime.value.trim() !== zero && startTime.value.trim() !== '');
   endTime.classList.toggle('has-value', endTime.value.trim() !== zero && endTime.value.trim() !== '');
+  updateTimeTooltips();
+}
+
+function updateTimeTooltips() {
+  const disabled = startTime.disabled;
+  const isYouTube = state.videoInfo && (state.videoInfo.platform === 'youtube' || !state.videoInfo.platform);
+  const zero = '00:00:00';
+
+  if (disabled) {
+    const reason = isYouTube === false
+      ? 'Clip points are only available for YouTube videos.'
+      : 'Paste a YouTube link to enable clip points.';
+    startTimeWrap.dataset.tooltip = reason;
+    endTimeWrap.dataset.tooltip = reason;
+    return;
+  }
+
+  const dur = state.videoInfo?.duration;
+  const durStr = dur ? ` · Video is ${formatDuration(dur)} long` : '';
+
+  const sv = startTime.value.trim();
+  startTimeWrap.dataset.tooltip = sv !== zero && sv !== ''
+    ? `Start: ${sv}${durStr}. Click × to clear.`
+    : `Clip start time${durStr}. Type or paste a timestamp.`;
+
+  const ev = endTime.value.trim();
+  endTimeWrap.dataset.tooltip = ev !== zero && ev !== ''
+    ? `End: ${ev}${durStr}. Click × to clear.`
+    : `Clip end time${durStr}. Leave blank to download to the end.`;
 }
 
 function resetVideoState() {
@@ -1336,7 +1836,7 @@ async function fetchInstagramContent(url) {
   statusRetry.style.display = 'none';
   hideCarousel();
 
-  setUrlHint(t('Checking Instagram post...'));
+  setPooledUrlHint('instagramCheck');
   updateDownloadBtnState();
 
   try {
@@ -1346,7 +1846,7 @@ async function fetchInstagramContent(url) {
       if (mediaInfo.isCarousel && mediaInfo.items.length > 1) {
         showCarouselPicker(mediaInfo, url);
         updateQualityLabels('instagram', 'carousel');
-        setUrlHint(t('Select items to download'), true);
+        setPooledUrlHint('carouselSelect', true);
 
         if (!mediaInfo.items.some(i => i.type === 'video')) {
           fetchAndMergeCarouselVideos(url);
@@ -1359,13 +1859,13 @@ async function fetchInstagramContent(url) {
       if (singleItem.type === 'video') {
         showSingleVideoCard(mediaInfo, url);
         updateQualityLabels('instagram', 'video');
-        setUrlHint(t('Reel ready to download'), true);
+        setPooledUrlHint('reelReady', true);
         return;
       }
 
       showSingleImageCard(mediaInfo, url);
       updateQualityLabels('instagram', 'image');
-      setUrlHint(t('Image ready to download'), true);
+      setPooledUrlHint('imageReady', true);
       return;
     }
 
@@ -1583,8 +2083,8 @@ async function handleCarouselDownload() {
   state.downloads.set(queueId, {
     id: queueId, title, quality: 'best',
     percent: 0, speed: '', status: 'downloading',
-    filePath: '', error: '', isCarousel: true,
-    carouselTotal: total, carouselDone: 0, carouselErrors: 0,
+    filePath: '', error: '', completionLines: {}, completionDetail: null,
+    isCarousel: true, carouselTotal: total, carouselDone: 0, carouselErrors: 0,
   });
 
   const el = document.createElement('div');
@@ -1684,11 +2184,25 @@ async function handleCarouselDownload() {
     if (detail) detail.textContent = `All ${errorCount} items failed`;
     el.className = 'queue-item error';
   } else {
-    if (dl) { dl.status = 'complete'; dl.percent = 100; dl.filePath = filePaths[0] || ''; }
+    if (dl) {
+      dl.completionDetail = {
+        key: 'carouselQueueComplete',
+        args: [downloadedCount, total, errorCount],
+        lines: {},
+      };
+      dl.percent = 100;
+      dl.filePath = filePaths[0] || '';
+      dl.status = 'complete';
+    }
     const detail = el.querySelector('.queue-item__detail');
     const fill = el.querySelector('.queue-item__fill');
     if (fill) { fill.className = 'queue-item__fill complete'; fill.style.width = '100%'; }
-    if (detail) detail.innerHTML = icon('checkmark-circle-02', 'ui-icon') + `${downloadedCount} of ${total} saved${errorCount > 0 ? ` (${errorCount} failed)` : ''}`;
+    if (detail) {
+      const completionText = dl
+        ? queueCompletionLine(dl)
+        : `${downloadedCount} of ${total} saved${errorCount > 0 ? ` (${errorCount} failed)` : ''}`;
+      detail.innerHTML = icon('checkmark-circle-02', 'ui-icon') + escapeHtml(completionText);
+    }
     el.className = 'queue-item complete';
 
     if (filePaths.length > 0 && !el.querySelector('.queue-item__show-file')) {
@@ -1705,12 +2219,12 @@ async function handleCarouselDownload() {
   updateDownloadBtnState();
 
   if (errorCount > 0 && downloadedCount > 0) {
-    showStatus('warning', `Downloaded ${downloadedCount} items, ${errorCount} failed.`);
-    const partialTitle = tp('carouselPartialTitle') || 'Carousel partially done, not your best work';
+    showStatusFromPool('warning', 'carouselPartialToast', downloadedCount, errorCount);
+    const partialTitle = copyFromPool('carouselPartialTitle');
     window.api.showNotification(partialTitle, `${downloadedCount} of ${total} saved`, filePaths[0] || '', 'bad');
   } else if (errorCount > 0 && downloadedCount === 0) {
     showStatus('error', `Failed to download all ${errorCount} items.`);
-    const failTitle = tp('carouselFailTitle') || 'Carousel download failed, absolute disaster';
+    const failTitle = copyFromPool('carouselFailTitle');
     window.api.showNotification(
       failTitle,
       `All ${errorCount} item${errorCount > 1 ? 's' : ''} failed to download.`,
@@ -1718,8 +2232,8 @@ async function handleCarouselDownload() {
       'bad'
     );
   } else {
-    showStatus('success', `Downloaded ${downloadedCount} item${downloadedCount > 1 ? 's' : ''}.`);
-    const notifTitle = tp('carouselNotifTitle') || 'Carousel downloaded, you absolute legend';
+    showStatusFromPool('success', 'carouselSuccessToast', downloadedCount);
+    const notifTitle = copyFromPool('carouselNotifTitle');
     window.api.showNotification(notifTitle, `${downloadedCount} item${downloadedCount > 1 ? 's' : ''} saved`, filePaths[0] || '', 'good');
   }
 }
@@ -2070,7 +2584,7 @@ window.api.onDownloadComplete((data) => {
     updateQueueItem(data.id);
   }
 
-  showStatus('success', t('Done, you lucky bastard!'));
+  showStatusFromPool('success', 'downloadSuccessToast');
 });
 
 window.api.onDownloadError((data) => {
@@ -2099,21 +2613,21 @@ window.api.onDownloadCancelled((data) => {
    ============================================================ */
 
 window.api.onYtdlpUpdated((version) => {
-  showStatus('success', tp('ytdlpAutoUpdated', version) || `Download engine updated to ${version}. Let's go!`);
+  showStatusFromPool('success', 'engineUpdatedToast', version);
 });
 
 window.api.onBackgroundActivity((data) => {
   if (data.type === 'ytdlp-check') {
     if (data.status === 'downloading') {
-      showActivityToast(t('First-time setup: downloading engine…'));
+      showActivityToast(copyFromPool('activityDownloadingEngine'));
     } else if (data.status === 'checking') {
-      showActivityToast(t('Hold tight, making sure everything works…'));
+      showActivityToast(copyFromPool('activityChecking'));
     } else if (data.status === 'updated') {
-      completeActivityToast(t('All systems go, baby'));
+      completeActivityToast(copyFromPool('activityReady'));
     } else if (data.status === 'up-to-date') {
-      completeActivityToast(t('All systems go, baby'));
+      completeActivityToast(copyFromPool('activityReady'));
     } else {
-      completeActivityToast(t('Ready'), 2000);
+      completeActivityToast(copyFromPool('activityReady'), 2000);
     }
   }
 });
@@ -2130,15 +2644,11 @@ window.api.onWindowFocus(async () => {
       state.lastClipboardUrl = text;
       urlInput.value = text;
       const platform = detectPlatform(text);
-      const platformName = platform ? platform.charAt(0).toUpperCase() + platform.slice(1) : '';
-      setUrlHint(`${platformName} link detected in clipboard`, true);
+      const platformName = platform ? platform.charAt(0).toUpperCase() + platform.slice(1) : 'Link';
+      const clipboardHintToken = setPooledUrlHint('clipboardDetected', true, platformName);
       handleUrlChange();
 
-      setTimeout(() => {
-        if (urlHint.textContent.includes('detected in clipboard')) {
-          setUrlHint('');
-        }
-      }, 4000);
+      setTimeout(() => clearUrlHintIfToken(clipboardHintToken), 4000);
     }
   } catch { /* ignore clipboard errors */ }
 });
@@ -2480,6 +2990,20 @@ downloadBtn.addEventListener('click', handleDownload);
 startTime.addEventListener('input', updateTimeHasValue);
 endTime.addEventListener('input', updateTimeHasValue);
 
+startTime.addEventListener('focus', () => startTime.select());
+endTime.addEventListener('focus', () => endTime.select());
+
+function clearTimeInput(input) {
+  input.value = '00:00:00';
+  input.classList.remove('has-value', 'error', 'auto-filled');
+  validateClipTimes(true);
+  updateDownloadBtnState();
+  updateTimeTooltips();
+}
+
+startTimeClear.addEventListener('click', () => clearTimeInput(startTime));
+endTimeClear.addEventListener('click', () => clearTimeInput(endTime));
+
 let disabledHintTimer = null;
 downloadBtn.addEventListener('pointerdown', () => {
   if (!downloadBtn.disabled) return;
@@ -2649,10 +3173,10 @@ async function setActiveProject(name) {
     const existing = state.projects.filter(p => p !== result.name);
     existing.unshift(result.name);
     state.projects = existing;
-    showStatus('info', `Locked into ${result.name}. Downloads go there now.`);
+    showStatusFromPool('info', 'projectLockedToast', result.name);
   } else {
     state.activeProject = null;
-    showStatus('info', 'Project cleared. Back to the main dump.');
+    showStatusFromPool('info', 'projectClearedToast');
   }
   updateProjectUI();
 }
@@ -2752,9 +3276,9 @@ if (instantDownloadToggle) {
     updateDownloadBtnLabel();
 
     if (state.instantDownload) {
-      showStatus('success', t('Instant Downloads on: paste a link and hit download, no waiting'));
+      showStatusFromPool('success', 'instantOnToast');
     } else {
-      showStatus('info', t('Instant Downloads off: links will scan first so you can preview and confirm'));
+      showStatusFromPool('info', 'instantOffToast');
     }
 
     // Re-run URL handling so the hint and button state reflect the new mode.
@@ -2782,9 +3306,9 @@ modeToggle.addEventListener('click', (e) => {
   window.api.setSetting('mode', state.mode);
   applyMode();
   if (state.mode === 'unhinged') {
-    showStatus('success', 'Lets fucking go! Welcome to Unhinged mode lol');
+    showStatusFromPool('success', 'modeUnhingedToast');
   } else {
-    showStatus('success', 'Honestly, fair enough. Welcome to Professional mode');
+    showStatusFromPool('success', 'modeProfessionalToast');
     setSticker('bad');
   }
 });
@@ -2804,7 +3328,7 @@ updateYtdlpBtn.addEventListener('click', async (e) => {
     if (result.success) {
       updateStatus.textContent = t('Done!');
       updateStatus.className = 'update-status success';
-      showStatus('success', tp('ytdlpUpdated', result.version) || `Download engine updated to ${result.version}, let's go!`);
+      showStatusFromPool('success', 'engineUpdatedToast', result.version);
       setTimeout(() => { updateStatus.textContent = ''; }, 4000);
     } else {
       updateStatus.textContent = result.error || t('Something went wrong');
@@ -3864,6 +4388,7 @@ async function init() {
   }
 
   updateDownloadBtnState();
+  updateTimeTooltips();
 
   requestAnimationFrame(() => {
     updatePillPosition(false);
