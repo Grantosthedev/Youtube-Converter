@@ -8,8 +8,8 @@ module.exports = {
     asar: {
       unpack: '**/node_modules/ffmpeg-static/**',
     },
-    name: 'DL Buddy',
-    appBundleId: 'com.grantosthedev.dlbuddy',
+    name: 'Downroad',
+    appBundleId: 'com.grantosthedev.downroad',
     icon: path.join(__dirname, 'assets', 'icon'),
     extraResource: [
       path.join(__dirname, 'bin', 'yt-dlp_macos.gz'),
@@ -30,7 +30,7 @@ module.exports = {
     ],
     osxSign: {},
     // osxNotarize: {
-    //   keychainProfile: 'DLBuddy'
+    //   keychainProfile: 'Downroad'
     // }
   },
   rebuildConfig: {},
@@ -43,7 +43,7 @@ module.exports = {
       name: '@electron-forge/maker-dmg',
       config: {
         format: 'ULFO',
-        name: 'DL Buddy',
+        name: 'Downroad',
       },
     },
   ],

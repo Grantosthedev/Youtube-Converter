@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteHistoryEntry: (id) => ipcRenderer.invoke('delete-history-entry', id),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  saveFile: (options) => ipcRenderer.invoke('save-file', options),
   showNotification: (title, body, filePath, stickerType) => ipcRenderer.invoke('show-notification', title, body, filePath, stickerType),
 
   onDownloadProgress: (callback) => {

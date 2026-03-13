@@ -1,0 +1,107 @@
+---
+description: Downroad UI design system — colours, typography, icons, spacing, animation, components
+alwaysApply: true
+---
+
+# Downroad Design System
+
+## Colours
+Always use CSS variables. Never hardcode hex values.
+
+| Variable | Value | Use |
+|---|---|---|
+| `--red-dark` | `#490504` | bg fills, pill backgrounds |
+| `--red-bright` | `#E20000` | accents, active states, buttons |
+| `--yellow-dark` | `#2E2200` | activity toast background |
+| `--yellow-bright` | `#E8A800` | activity toast text & spinner |
+| `--grey-muted` | `#A1A1A1` | placeholder, secondary text |
+| `--white` | `#FFFFFF` | primary text |
+| `--color-error` | `#FF453A` | error states & toasts |
+| `--color-success` | `#30D158` | success states |
+| `--color-warning` | `#FFD60A` | warning toasts |
+| `--color-info` | `#FFFFFF` | info toasts |
+
+## Typography
+- Font: `Ligconsolata Bold` (monospace), 700 weight
+- Base size: 14px. Scale: 11px meta · 12px chips · 13px secondary · 15px inputs · 18px headings
+
+**Punctuation — strictly enforced:**
+- ❌ Never use em dashes (`—`) anywhere in UI text
+- ✅ Use `:` for label/continuation — e.g. `Ready: click Download`
+- ✅ Use ` · ` to separate metadata — e.g. `1080p · MP4`
+- ✅ Use `.` for sentence breaks
+- ✅ Use `-` as a null/empty placeholder value
+
+## Iconography
+- **Only Hugeicons** (rounded stroke set). No emoji, no unicode symbols, no inline SVG.
+- In JS: `icon('icon-name', 'ui-icon')` → renders `<i class="hgi-stroke hgi-{name}">`
+- In HTML: `<i class="hgi-stroke hgi-{name} ui-icon">` + size modifier class
+
+## Border Radius
+- `--radius-pill: 45px` — URL bar, buttons, time inputs, quality bar
+- `--radius-card: 18px` — video card, carousel card, toasts
+- `--radius-sm: 10px` — queue items, small cards
+
+## Spacing & Layout
+- `--gap: 12px` — standard gap between stacked elements
+- URL/controls width: 92%, max 900px, min 420px, centred
+
+## Animation
+- `--spring: cubic-bezier(0.32, 1.05, 0.36, 1)` — bouncy entrances
+- `--ease: cubic-bezier(0.32, 0.72, 0, 1)` — smooth exits
+- Animate with: `scale`, `translate`, `opacity`, `box-shadow` only
+- ❌ No glow, no blur, no gradients on interactive elements
+
+## Light Mode
+
+### How it works
+Light mode is driven by the `html.light-mode` class, applied by `applyTheme()` in `renderer.js`. The user can override via the Appearance toggle in Settings (dark / auto / light). All light-mode CSS lives at the bottom of `styles.css` under `html.light-mode` selectors — never scatter light-mode rules elsewhere, never use `@media (prefers-color-scheme: light)`.
+
+### Core variable overrides (light)
+| Variable | Light value | Effect |
+|---|---|---|
+| `--red-dark` | `hsl(0, 68%, 80%)` | All dark pill/card backgrounds become warm pastel pink |
+| `--grey-muted` | `hsl(0, 25%, 44%)` | Muted text stays readable on pink backgrounds |
+
+### Project colours (light)
+Each project has two extra colour tokens set via JS `projectColors()`:
+| Token | Formula | Use |
+|---|---|---|
+| `--proj-light-bg` | `hsl(hue, 60%, 72%)` | Pastel pill / card background |
+| `--proj-light-text` | `hsl(hue, 72%, 28%)` | Dark saturated text on pastel bg |
+
+### Light-mode component rules
+| Component | Light treatment |
+|---|---|
+| **URL row** | Black-opacity border `rgba(0,0,0,0.75)` |
+| **Download button** | Keeps `--red-bright` bg, forces `#fff` text (not `--red-dark`) |
+| **Time inputs / Quality bar** | Brand red (`--red-dark` → pastel pink bg, `--red-bright` text) |
+| **Quality bar active label** | `#fff` (sits on red pill indicator) |
+| **Quality option text** | `--red-bright` |
+| **Settings / Queue / Help popovers** | `--red-dark` → pastel pink bg; all `var(--white)` text overridden to `--red-bright` or `#111` |
+| **Video card** | `--proj-subtle` tint bg; title falls back to `#111` when no project |
+| **Carousel card** | `--red-dark` → pastel pink bg; title/count overridden to `#111` |
+| **History view** | `rgba(245,245,245,0.97)` backdrop; entry cards use `--proj-light-bg` with `--proj-light-text` |
+| **Activity toast** | `hsl(42,90%,88%)` bg, `hsl(42,100%,26%)` text (light amber) |
+| **Status toasts** | Transparent tint of semantic colour (`rgba(R,G,B,0.13)`) |
+| **Drop overlay** | `rgba(226,0,0,0.4)` semi-transparent scrim |
+| **btn-hint** | `rgba(0,0,0,0.72)` dark pill with white text |
+| **Scrollbars** | `rgba(0,0,0,0.2)` global; `rgba(0,0,0,0.15)` history list |
+| **Project pill** | `--proj-light-bg` bg, `--proj-light-text` text |
+| **Active filter / menu item** | `--proj-light-bg` bg, `--proj-light-text` text |
+
+### Rules
+- ✅ All light overrides use `html.light-mode .selector { }` prefix
+- ✅ Multi-selector rules must prefix EVERY selector with `html.light-mode`
+- ❌ Never use `@media (prefers-color-scheme: light)` — the class handles both auto and manual
+- ❌ Never hardcode `rgba(255,255,255,X)` subtle backgrounds in light mode — use `rgba(0,0,0,X)`
+- ❌ Never use `color: var(--white)` on elements that sit on `--red-dark` backgrounds in light mode
+
+## Key Components
+- **URL Row** — white 2px border pill, `background: transparent`, max 900px
+- **Download button** — red pill inside URL row, 10px inset margin, 38px tall
+- **Time inputs** — `--red-dark` pill, inset box-shadow ring (green = has value, red = error)
+- **Quality bar** — `--red-dark` pill, sliding red pill indicator
+- **Activity toast** — `--yellow-dark` bg, `--yellow-bright` text, fixed bottom-centre
+- **Status toast** — `--red-dark` bg, coloured text, max 520px, copy button on errors
+- **Sticker** — 220×220px, `object-fit: contain`, pop animation on swap

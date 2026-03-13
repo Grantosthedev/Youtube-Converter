@@ -1,4 +1,4 @@
-# DL Buddy
+# Downroad
 
 A simple macOS desktop app for downloading YouTube video clips. Paste a URL, set in/out points, choose quality, and download — only the section you need is fetched, not the full video.
 
@@ -17,7 +17,7 @@ Built with Electron, yt-dlp, and ffmpeg.
 ## Installation (for coworkers)
 
 1. Download the `.dmg` file
-2. Open it and drag **DL Buddy** to your Applications folder
+2. Open it and drag **Downroad** to your Applications folder
 3. **Important — first launch on macOS:**
    - Right-click the app and select **Open**
    - Click **Open** in the dialog that appears

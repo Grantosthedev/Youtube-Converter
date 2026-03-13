@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://*.instagram.com https://*.cdninstagram.com https://*.fbcdn.net; img-src 'self' data: https://*.ytimg.com https://*.ggpht.com https://i.ytimg.com https://*.cdninstagram.com https://*.fbcdn.net https://*.tiktokcdn.com https://*.tiktokcdn-us.com; style-src 'self' 'unsafe-inline' https://use.hugeicons.com; font-src 'self' https://use.hugeicons.com;">
-  <title>DL Buddy</title>
+  <title>Downroad</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="https://use.hugeicons.com/font/icons.css">
 </head>
@@ -14,7 +14,7 @@
     <!-- Download Queue (fixed top-right) -->
     <div class="queue-anchor">
       <button id="queueBtn" class="queue-btn" aria-label="Downloads">
-        <i class="hgi-stroke hgi-download-04 ui-icon ui-icon--button" aria-hidden="true"></i>
+        <i class="hgi-stroke hgi-clock-arrow-down ui-icon ui-icon--button" aria-hidden="true"></i>
         <span id="queueBadge" class="queue-badge"></span>
       </button>
       <div id="queuePanel" class="queue-panel">
@@ -80,13 +80,21 @@
         <span class="clip-range__separator">to</span>
         <input type="text" id="endTime" class="time-input" placeholder="00:00:00" value="00:00:00" disabled>
       </div>
-      <div id="qualitySelector" class="quality-bar">
-        <div class="pill-indicator" id="pillIndicator"></div>
-        <button class="quality-option active" data-quality="best">Best / 4K</button>
-        <button class="quality-option" data-quality="hd">HD 1080p</button>
-        <button class="quality-option" data-quality="audio">Audio Only</button>
+      <div class="quality-anchor">
+        <div id="qualitySelector" class="quality-bar">
+          <div class="pill-indicator" id="pillIndicator"></div>
+          <button class="quality-option active" data-quality="best">
+            <span id="qualityBtnLabel">Video / Photo</span>
+            <i class="hgi-stroke hgi-arrow-down-01 quality-chevron" id="qualityChevron" aria-hidden="true"></i>
+          </button>
+          <button class="quality-option" data-quality="audio">Audio Only</button>
+        </div>
+        <div id="qualityDropdown" class="quality-dropdown">
+          <div id="qualityDropdownList" class="quality-dropdown__list"></div>
+        </div>
       </div>
     </div>
+    <div id="qualityBackdrop" class="quality-backdrop"></div>
 
     <!-- Video Info Card (below controls) -->
     <div id="videoCard" class="video-card">
@@ -125,24 +133,44 @@
       </button>
       <div id="settingsPopover" class="settings-popover">
         <div class="settings-row">
-          <span class="settings-label">Auto-paste</span>
+          <span class="settings-label" data-tooltip="Grabs a URL straight from your clipboard the moment the app opens. Skip the paste.">Auto-paste</span>
           <button id="autoPasteToggle" class="toggle" aria-label="Toggle auto-paste">
             <span class="toggle__knob"></span>
           </button>
         </div>
         <div class="settings-row">
-          <span class="settings-label">Show in Finder</span>
+          <span class="settings-label" data-tooltip="Pops open Finder to your file the second a download finishes. No hunting around.">Show in Finder</span>
           <button id="showInFinderToggle" class="toggle" aria-label="Toggle show in Finder">
             <span class="toggle__knob"></span>
           </button>
         </div>
         <div class="settings-row">
-          <span class="settings-label">Professional Mode</span>
+          <span class="settings-label" data-tooltip="Starts ripping the second you paste a link — no waiting for video info to load first.">Instant Downloads</span>
+          <button id="instantDownloadToggle" class="toggle" aria-label="Toggle instant downloads">
+            <span class="toggle__knob"></span>
+          </button>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label" data-tooltip="Unlocks specific resolution and format picking. More control, more decisions. For nerds.">Professional Mode</span>
           <button id="modeToggle" class="toggle" aria-label="Toggle professional mode">
             <span class="toggle__knob"></span>
           </button>
         </div>
-        <button id="historyBtn" class="settings-action-btn">History</button>
+        <div class="settings-row">
+          <span class="settings-label" data-tooltip="Dark, light, or follow the system. Picks the window vibrancy too, not just colours.">Appearance</span>
+          <div id="themeToggle" class="theme-toggle">
+            <button class="theme-btn" data-theme="dark" aria-label="Dark mode">
+              <i class="hgi-stroke hgi-moon-02 ui-icon ui-icon--xs"></i>
+            </button>
+            <button class="theme-btn" data-theme="auto" aria-label="System default">
+              <i class="hgi-stroke hgi-computer ui-icon ui-icon--xs"></i>
+            </button>
+            <button class="theme-btn" data-theme="light" aria-label="Light mode">
+              <i class="hgi-stroke hgi-sun-01 ui-icon ui-icon--xs"></i>
+            </button>
+          </div>
+        </div>
+        <button id="historyBtn" class="settings-action-btn"><i class="hgi-stroke hgi-clock-01 ui-icon" aria-hidden="true"></i>History</button>
         <div class="settings-divider"></div>
         <button id="appUpdateBtn" class="settings-action-btn settings-app-update" style="display:none">Update Available</button>
         <div class="settings-row">
@@ -168,13 +196,13 @@
           <span class="help-chip">tiktok</span>
           <span class="help-chip help-chip--secret" id="yaMumChip" style="display:none">ya mum</span>
         </div>
-        <span class="help-popover__disclaimer">support for a service does not imply affiliation, endorsement, or any form of support other than technical compatibility.</span>
+        <span class="help-popover__disclaimer">paste a link · pick a quality · rip it. clip any section with the time inputs. audio-only mode strips the video. projects keep your downloads organised. no affiliation with any platform listed above.</span>
       </div>
     </div>
 
     <!-- Logo (fixed bottom-right) -->
     <div class="logo-anchor">
-      <img src="logo-text.svg" alt="DL Buddy" class="logo-text" draggable="false">
+      <img src="logo-text.svg" alt="Downroad" class="logo-text" draggable="false">
     </div>
 
     <!-- Drag & Drop Overlay -->
@@ -205,6 +233,7 @@
         <i class="hgi-stroke hgi-arrow-left-01 ui-icon ui-icon--button" aria-hidden="true"></i>
       </button>
       <span class="history-title">Download History</span>
+      <button id="historyExportBtn" class="history-export-btn"><i class="hgi-stroke hgi-download-04 ui-icon ui-icon--action" aria-hidden="true"></i>Export All</button>
       <button id="historyClearBtn" class="history-clear-btn">Clear All</button>
     </div>
 
@@ -213,6 +242,7 @@
         <input type="text" id="historySearch" class="history-search" placeholder="Search title, channel, URL..." spellcheck="false" autocomplete="off">
       </div>
       <div class="history-filters">
+        <div class="history-filter-pill" id="historyFilterPill"></div>
         <button class="history-filter active" data-filter="all">All</button>
         <button class="history-filter" data-filter="video">Video</button>
         <button class="history-filter" data-filter="audio">Audio</button>
@@ -229,6 +259,17 @@
 
     <div class="history-sort-row">
       <span id="historyCount" class="history-count">0 downloads</span>
+      <div class="history-view-toggles">
+        <button class="history-view-btn active" data-view="list" aria-label="List view">
+          <i class="hgi-stroke hgi-list-view ui-icon" aria-hidden="true"></i>
+        </button>
+        <button class="history-view-btn" data-view="grid" aria-label="Grid view">
+          <i class="hgi-stroke hgi-grid-view ui-icon" aria-hidden="true"></i>
+        </button>
+        <button class="history-view-btn" data-view="compact" aria-label="Compact view">
+          <i class="hgi-stroke hgi-menu-01 ui-icon" aria-hidden="true"></i>
+        </button>
+      </div>
       <button id="historySortBtn" class="history-sort-btn" data-sort="newest">Newest first</button>
     </div>
 
@@ -241,5 +282,6 @@
   </div>
 
   <script src="renderer.js"></script>
+  <div id="tooltip" class="ui-tooltip" role="tooltip" aria-hidden="true"></div>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* ============================================================
-   DL BUDDY — Design System
+   DOWNROAD — Design System
    ──────────────────────────────────────────────────────────
    COLOUR PALETTE
      Red (primary)
@@ -17,11 +17,17 @@
        --color-warning: #FFD60A   warning toasts
        --color-info:    #FFFFFF   info toasts (no icon)
 
-   TYPOGRAPHY
-     Font:    Ligconsolata Bold (monospace w/ ligatures, SIL OFL)
-     Base:    14px / 700
-     Scale:   11px meta · 12px chips/badges · 13px secondary
-              14px body/buttons · 15px time inputs · 18px headings
+  TYPOGRAPHY
+    Font:    Ligconsolata Bold (monospace w/ ligatures, SIL OFL)
+    Base:    14px / 700
+    Scale:   11px meta · 12px chips/badges · 13px secondary
+             14px body/buttons · 15px time inputs · 18px headings
+    Punctuation rules:
+      - NO em dashes (—) anywhere in UI text. Ever.
+      - Use a colon (: ) for label/continuation pairs  e.g. "Ready: click Download"
+      - Use a middle dot ( · ) to separate metadata items  e.g. "1080p · MP4"
+      - Use a period (.) for sentence breaks
+      - Use a plain hyphen (-) as a null/empty placeholder value
 
    ICONOGRAPHY
      Provider: Hugeicons only (rounded stroke set via hgi-stroke)
@@ -401,7 +407,7 @@ input, button {
   height: 100%;
   width: 0%;
   border-radius: 999px;
-  background: var(--red-bright);
+  background: var(--proj-bright, var(--red-bright));
   position: relative;
   overflow: hidden;
 }
@@ -457,7 +463,7 @@ input, button {
 
 .queue-item__detail {
   font-size: 12px;
-  color: var(--grey-muted);
+  color: var(--proj-bright-sub, var(--grey-muted));
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -499,14 +505,18 @@ input, button {
   font-size: 12px;
 }
 
+.queue-item.complete .queue-item__quality {
+  display: none;
+}
+
 .queue-item.error .queue-item__detail {
   color: var(--color-error);
 }
 
 .queue-item__quality {
   font-size: 11px;
-  color: var(--red-bright);
-  background: rgba(226,0,0,0.12);
+  color: var(--proj-bright, var(--red-bright));
+  background: var(--proj-subtle, rgba(226,0,0,0.12));
   padding: 2px 8px;
   border-radius: 999px;
   flex-shrink: 0;
@@ -514,8 +524,8 @@ input, button {
 
 .queue-item__show-file {
   font-size: 12px;
-  color: var(--white);
-  background: var(--red-bright);
+  color: var(--proj-bright, var(--red-bright));
+  background: var(--proj-dark, var(--red-dark));
   cursor: pointer;
   flex-shrink: 0;
   padding: 2px 8px;
@@ -785,7 +795,7 @@ input, button {
 }
 
 .url-hint.clipboard::before {
-  content: '\f15ad';
+  content: '\f223d'; /* tick-01 stroke-rounded */
   font-family: 'hugeicons-stroke-rounded' !important;
   display: inline-flex;
   align-items: center;
@@ -795,9 +805,8 @@ input, button {
   min-width: 16px;
   background: var(--color-success);
   border-radius: 50%;
-  color: #FFFFFF;
+  color: #ffffff;
   font-size: 11px;
-  font-weight: 700;
   line-height: 1;
 }
 
@@ -813,6 +822,11 @@ input, button {
   max-width: 900px;
   min-width: 420px;
   margin-bottom: var(--gap);
+}
+
+/* Elevate controls-row above the quality backdrop (z-index 190) when dropdown is open */
+.controls-row:has(.quality-dropdown.visible) {
+  z-index: 195;
 }
 
 /* ============================================================
@@ -881,22 +895,32 @@ input, button {
    Quality Bar — Compact pill selector
    ============================================================ */
 
+.quality-anchor {
+  position: relative;
+  flex: 0 1 41%;
+  max-width: 375px;
+  display: flex;
+  justify-content: flex-end;
+  transition: max-width 450ms var(--spring);
+}
+
+.quality-anchor:has(.quality-bar.compact) {
+  max-width: 180px;
+}
+
 .quality-bar {
   display: flex;
   position: relative;
-  flex: 0 1 55%;
-  max-width: 500px;
+  width: 100%;
   background: var(--red-dark);
   border-radius: var(--radius-pill);
   padding: 6px;
   gap: 0;
   min-width: 0;
   overflow: hidden;
-  transition: max-width 450ms var(--spring);
 }
 
 .quality-bar.compact {
-  max-width: 180px;
   pointer-events: none;
 }
 
@@ -930,6 +954,7 @@ input, button {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   border-radius: var(--radius-pill);
   font-size: 14px;
   cursor: pointer;
@@ -938,7 +963,7 @@ input, button {
   position: relative;
   z-index: 1;
   white-space: nowrap;
-  padding: 0 8px;
+  padding: 0 12px;
   overflow: hidden;
   transition:
     flex-grow 450ms var(--spring),
@@ -959,6 +984,115 @@ input, button {
   pointer-events: none;
 }
 
+.quality-chevron {
+  font-size: 16px;
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  transition:
+    opacity 200ms var(--ease),
+    width 200ms var(--ease),
+    transform 200ms var(--ease);
+  flex-shrink: 0;
+}
+
+.quality-chevron.visible {
+  opacity: 1;
+  width: 20px;
+}
+
+.quality-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* ============================================================
+   Quality Dropdown
+   ============================================================ */
+
+.quality-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+  -webkit-app-region: no-drag;
+}
+
+.quality-backdrop.visible {
+  display: block;
+}
+
+.quality-dropdown {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 200px;
+  background: #490504;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-card);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 200;
+  opacity: 0;
+  transform: scale(0.85) translateY(8px);
+  transform-origin: bottom left;
+  pointer-events: none;
+  transition:
+    opacity 200ms var(--ease),
+    transform 350ms var(--spring);
+}
+
+.quality-dropdown.visible {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  pointer-events: auto;
+}
+
+.quality-dropdown__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quality-dropdown__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--white);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 150ms var(--ease);
+  gap: 8px;
+}
+
+.quality-dropdown__item:hover {
+  background: rgba(226,0,0,0.15);
+}
+
+.quality-dropdown__item.active {
+  background: rgba(226,0,0,0.25);
+  color: var(--red-bright);
+}
+
+.quality-dropdown__item-label {
+  flex: 1;
+}
+
+.quality-dropdown__item-check {
+  flex-shrink: 0;
+  font-size: 12px;
+  opacity: 0;
+}
+
+.quality-dropdown__item.active .quality-dropdown__item-check {
+  opacity: 1;
+}
+
 /* ============================================================
    Video Card (below controls)
    ============================================================ */
@@ -970,9 +1104,10 @@ input, button {
   gap: 12px;
   padding: 12px;
   margin-bottom: var(--gap);
-  background: var(--red-dark);
+  background: var(--proj-dark, var(--red-dark));
   border-radius: var(--radius-card);
   overflow: hidden;
+  transition: background 300ms var(--ease);
 }
 
 .video-card.visible {
@@ -1011,25 +1146,28 @@ input, button {
 
 .video-card__title {
   font-size: 13px;
-  color: var(--white);
+  color: var(--proj-bright, var(--white));
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  transition: color 300ms var(--ease);
 }
 
 .video-card__meta {
   font-size: 12px;
-  color: var(--grey-muted);
+  color: var(--proj-bright-sub, var(--grey-muted));
   margin-top: 3px;
+  transition: color 300ms var(--ease);
 }
 
 .video-card__qualities {
   font-size: 12px;
-  color: var(--grey-muted);
+  color: var(--proj-bright-sub, var(--grey-muted));
   margin-top: 2px;
+  transition: color 300ms var(--ease);
 }
 
 /* ============================================================
@@ -1247,12 +1385,15 @@ input, button {
 .video-card.loading .video-card__thumb-wrap,
 .video-card.loading .video-card__title,
 .video-card.loading .video-card__meta {
-  background: rgba(226,0,0,0.08);
+  background: var(--proj-shimmer-lo, rgba(226,0,0,0.08));
   border-radius: 6px;
   color: transparent;
   animation: shimmer 1.5s infinite;
   background-size: 200% 100%;
-  background-image: linear-gradient(90deg, rgba(226,0,0,0.06) 25%, rgba(226,0,0,0.14) 50%, rgba(226,0,0,0.06) 75%);
+  background-image: linear-gradient(90deg,
+    var(--proj-shimmer-lo, rgba(226,0,0,0.06)) 25%,
+    var(--proj-shimmer-hi, rgba(226,0,0,0.14)) 50%,
+    var(--proj-shimmer-lo, rgba(226,0,0,0.06)) 75%);
 }
 
 .video-card.loading .video-card__title { width: 80%; height: 14px; }
@@ -1323,7 +1464,7 @@ input, button {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 180px;
+  width: 240px;
   background: var(--red-dark);
   border-radius: var(--radius-card);
   padding: 14px;
@@ -1355,6 +1496,40 @@ input, button {
 .settings-label {
   font-size: 13px;
   color: var(--white);
+  cursor: default;
+}
+
+/* ============================================================
+   Tooltip
+   ============================================================ */
+
+.ui-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 210px;
+  padding: 7px 11px;
+  background: rgba(30, 30, 30, 0.96);
+  color: #e8e8e8;
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 130ms var(--ease),
+    transform 130ms var(--ease);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.ui-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+html.light-mode .ui-tooltip {
+  background: rgba(30, 30, 30, 0.92);
+  color: #f0f0f0;
 }
 
 .settings-divider {
@@ -1536,8 +1711,8 @@ input, button {
 }
 
 .help-chip--secret {
-  background: rgba(226,0,0,0.18);
-  color: var(--red-bright);
+  background: rgba(255,255,255,0.08);
+  color: var(--white);
   animation: slideDown 300ms var(--spring);
 }
 
@@ -1766,6 +1941,7 @@ input, button {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   transition: transform 200ms var(--spring);
 }
 
@@ -1794,7 +1970,7 @@ input, button {
   z-index: 200;
   flex-direction: column;
   padding: 0;
-  background: rgba(20, 2, 2, 0.92);
+  background: rgba(0, 0, 0, 0.92);
   backdrop-filter: blur(40px);
   -webkit-backdrop-filter: blur(40px);
   -webkit-app-region: drag;
@@ -1847,6 +2023,36 @@ input, button {
   font-size: 18px;
   color: var(--white);
   flex: 1;
+}
+
+.history-export-btn {
+  font-size: 13px;
+  color: var(--red-bright);
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  background: rgba(226,0,0,0.12);
+  border: 1.5px solid rgba(226,0,0,0.25);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: transform 200ms var(--spring), background 200ms var(--ease), border-color 200ms var(--ease);
+}
+
+.history-export-btn:hover {
+  background: rgba(226,0,0,0.2);
+  border-color: rgba(226,0,0,0.45);
+  transform: scale(1.03);
+}
+
+.history-export-btn:active {
+  transform: scale(0.97);
+}
+
+.history-export-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .history-clear-btn {
@@ -1908,6 +2114,7 @@ input, button {
 
 .history-filters {
   display: flex;
+  position: relative;
   background: var(--red-dark);
   border-radius: var(--radius-pill);
   padding: 4px;
@@ -1915,17 +2122,37 @@ input, button {
   flex-shrink: 0;
 }
 
+.history-filter-pill {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  height: calc(100% - 8px);
+  background: var(--red-bright);
+  border-radius: var(--radius-pill);
+  z-index: 0;
+  pointer-events: none;
+  transition: transform 450ms var(--spring), width 450ms var(--spring);
+  will-change: transform, width;
+}
+
 .history-filter {
+  position: relative;
+  z-index: 1;
   height: 32px;
   padding: 0 14px;
   border-radius: var(--radius-pill);
   font-size: 13px;
   cursor: pointer;
   color: var(--grey-muted);
-  transition: color 200ms var(--ease), background 200ms var(--ease);
+  transition: color 200ms var(--ease);
 }
 
-.history-filter.active {
+.history-filter[data-filter].active {
+  background: transparent;
+  color: var(--red-dark);
+}
+
+.history-filter:not([data-filter]).active {
   background: var(--proj-dark, var(--red-bright));
   color: var(--proj-bright, var(--white));
 }
@@ -2002,7 +2229,7 @@ input, button {
 
 .history-entry__title {
   font-size: 14px;
-  color: var(--white);
+  color: var(--proj-pill-text, var(--red-bright));
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2011,7 +2238,7 @@ input, button {
 
 .history-entry__meta {
   font-size: 13px;
-  color: var(--grey-muted);
+  color: var(--proj-bright-sub, rgba(226,0,0,0.55));
   margin-top: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2020,8 +2247,8 @@ input, button {
 
 .history-entry__quality {
   font-size: 12px;
-  color: var(--red-bright);
-  background: rgba(226,0,0,0.12);
+  color: var(--proj-bright, var(--red-bright));
+  background: var(--proj-subtle, rgba(226,0,0,0.12));
   padding: 3px 10px;
   border-radius: var(--radius-pill);
   flex-shrink: 0;
@@ -2031,13 +2258,13 @@ input, button {
 
 .history-entry__date {
   font-size: 12px;
-  color: var(--grey-muted);
+  color: var(--proj-bright-sub, var(--grey-muted));
   flex-shrink: 0;
   white-space: nowrap;
 }
 
 .history-entry__chevron {
-  color: var(--grey-muted);
+  color: var(--proj-bright-sub, var(--grey-muted));
   flex-shrink: 0;
   transition: transform 250ms var(--spring);
   display: flex;
@@ -2050,14 +2277,26 @@ input, button {
 
 /* ---- Detail (expanded) ---- */
 
+/* Height is driven by WAAPI in JS — starts at 0, no layout footprint when closed */
 .history-entry__detail {
-  display: none;
-  padding: 0 16px 16px;
+  height: 0;
+  overflow: hidden;
 }
 
-.history-entry.expanded .history-entry__detail {
-  display: block;
-  animation: slideDown 200ms var(--ease);
+.history-entry__detail-inner {
+  padding: 0 16px 16px;
+  opacity: 0;
+  transition: opacity 220ms var(--ease);
+}
+
+.history-entry.expanded .history-entry__detail-inner {
+  opacity: 1;
+  transition: opacity 300ms var(--ease) 80ms;
+}
+
+.history-entry__detail.is-closing .history-entry__detail-inner {
+  opacity: 0;
+  transition: opacity 160ms var(--ease);
 }
 
 .history-entry__detail-divider {
@@ -2071,26 +2310,98 @@ input, button {
   grid-template-columns: 90px 1fr;
   gap: 8px 16px;
   font-size: 13px;
+  align-items: center;
 }
 
 .history-detail-grid dt {
-  color: var(--grey-muted);
+  color: var(--proj-bright-sub, var(--grey-muted));
   white-space: nowrap;
+  align-self: center;
 }
 
+/* dd is a flex row: text truncates on the left, copy btn trails immediately after */
 .history-detail-grid dd {
-  color: var(--white);
-  word-break: break-word;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--proj-pill-text, var(--red-bright));
+  align-self: center;
+}
+
+.history-dd-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.history-view .history-dd-text {
+  user-select: text;
+  cursor: text;
+}
+
+/* File-link paths should be pointer-clickable, not text-selectable —
+   user-select: text was preventing reliable click events in Electron */
+.history-view dd.file-link .history-dd-text {
+  cursor: pointer;
+  user-select: none;
+}
+
+.history-copy-row-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--grey-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition:
+    opacity 150ms var(--ease),
+    background 150ms var(--ease),
+    color 150ms var(--ease),
+    transform 150ms var(--spring);
+  border: none;
+  padding: 0;
+}
+
+.history-entry__detail-inner:hover .history-copy-row-btn {
+  opacity: 0.3;
+}
+
+.history-copy-row-btn:hover {
+  opacity: 1 !important;
+  background: rgba(255,255,255,0.08);
+  color: var(--white);
+  transform: scale(1.1);
+}
+
+.history-copy-row-btn:active {
+  transform: scale(0.9);
+}
+
+.history-copy-row-btn.copied {
+  opacity: 1 !important;
+  color: var(--color-success);
+}
+
+.history-copy-row-btn--empty {
+  pointer-events: none;
+  cursor: default;
 }
 
 .history-detail-grid dd.muted {
-  color: var(--grey-muted);
+  color: var(--proj-bright-sub, var(--grey-muted));
 }
 
 .history-detail-grid dd.file-link {
-  color: var(--red-bright);
+  color: var(--proj-bright, var(--red-bright));
   cursor: pointer;
   text-decoration: underline;
   text-decoration-color: transparent;
@@ -2099,7 +2410,7 @@ input, button {
 }
 
 .history-detail-grid dd.file-link:hover {
-  text-decoration-color: var(--red-bright);
+  text-decoration-color: var(--proj-bright, var(--red-bright));
 }
 
 .history-detail-grid dd.file-link.missing {
@@ -2144,14 +2455,14 @@ input, button {
 
 .history-action-btn--copy {
   background: transparent;
-  color: var(--red-bright);
-  border: 1.5px solid rgba(226,0,0,0.3);
+  color: var(--proj-bright, var(--red-bright));
+  border: 1.5px solid color-mix(in srgb, var(--proj-bright, var(--red-bright)) 35%, transparent);
 }
 
 .history-action-btn--delete {
   background: transparent;
-  color: var(--grey-muted);
-  border: 1.5px solid rgba(255,255,255,0.08);
+  color: var(--proj-bright-sub, var(--grey-muted));
+  border: 1.5px solid color-mix(in srgb, var(--proj-bright-sub, rgba(255,255,255,1)) 12%, transparent);
   margin-left: auto;
 }
 
@@ -2167,14 +2478,14 @@ input, button {
 
 .history-action-btn--copyinfo {
   background: transparent;
-  color: var(--red-bright);
-  border: 1.5px solid rgba(226,0,0,0.3);
+  color: var(--proj-bright, var(--red-bright));
+  border: 1.5px solid color-mix(in srgb, var(--proj-bright, var(--red-bright)) 35%, transparent);
 }
 
 .history-action-btn--open {
   background: transparent;
-  color: var(--grey-muted);
-  border: 1.5px solid rgba(255,255,255,0.08);
+  color: var(--proj-bright-sub, var(--grey-muted));
+  border: 1.5px solid color-mix(in srgb, var(--proj-bright-sub, rgba(255,255,255,1)) 12%, transparent);
 }
 
 .pop {
@@ -2184,7 +2495,7 @@ input, button {
 /* ---- Clickable file path in detail grid ---- */
 
 .history-detail-grid .file-link {
-  color: var(--red-bright);
+  color: var(--proj-bright, var(--red-bright));
   cursor: pointer;
   transition: opacity 200ms var(--ease);
 }
@@ -2204,6 +2515,334 @@ input, button {
 .history-clear-btn.confirm {
   color: var(--color-error);
   background: rgba(255,69,58,0.15);
+}
+
+/* ============================================================
+   History view toggles
+   ============================================================ */
+
+.history-view-toggles {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.history-view-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--grey-muted);
+  cursor: pointer;
+  transition: color 150ms var(--ease), background 150ms var(--ease);
+}
+
+.history-view-btn:hover {
+  color: var(--white);
+  background: rgba(255,255,255,0.08);
+}
+
+.history-view-btn.active {
+  color: var(--red-bright);
+  background: rgba(226,0,0,0.12);
+}
+
+/* ============================================================
+   Thumbnail shared — all views
+   ============================================================ */
+
+.history-thumb--placeholder {
+  background: var(--proj-dark, var(--red-dark));
+}
+
+.history-thumb__icon {
+  font-size: inherit;
+  color: var(--proj-bright, var(--red-bright));
+  opacity: 0.5;
+}
+
+/* ============================================================
+   List view — thumbnail strip
+   ============================================================ */
+
+.history-list--list .history-entry {
+  /* existing card, no layout change */
+}
+
+.history-entry__thumb {
+  width: 56px;
+  height: 38px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--grey-muted);
+}
+
+.history-entry__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ============================================================
+   Grid view
+   ============================================================ */
+
+.history-list--grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 12px;
+  align-content: start;
+  flex-direction: unset;
+  padding-top: 8px;
+  overflow-x: visible;
+}
+
+.history-grid-card {
+  background: var(--proj-dark, var(--red-dark));
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  cursor: pointer;
+  animation: slideDown 250ms var(--ease);
+  transition: transform 160ms var(--spring), box-shadow 160ms var(--ease);
+  will-change: transform;
+}
+
+.history-grid-card:hover {
+  transform: translateY(-3px) scale(1.025);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+}
+
+.history-grid-card:active {
+  transform: scale(0.97);
+}
+
+.history-grid-card__thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  color: var(--grey-muted);
+}
+
+.history-grid-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.history-grid-card__body {
+  padding: 10px 12px 12px;
+}
+
+.history-grid-card__title {
+  font-size: 13px;
+  color: var(--proj-pill-text, var(--white));
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 5px;
+}
+
+.history-grid-card__meta {
+  font-size: 12px;
+  color: var(--proj-bright-sub, var(--grey-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 7px;
+}
+
+.history-grid-card__quality {
+  font-size: 11px;
+  color: var(--proj-bright, var(--red-bright));
+  background: var(--proj-subtle, rgba(226,0,0,0.12));
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ============================================================
+   Compact view
+   ============================================================ */
+
+.history-list--compact {
+  gap: 2px !important;
+}
+
+.history-compact-row {
+  background: var(--proj-dark, var(--red-dark));
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  cursor: pointer;
+  animation: slideDown 200ms var(--ease);
+  transition: background 130ms var(--ease);
+}
+
+.history-compact-row:hover {
+  background: color-mix(in srgb, var(--proj-dark, var(--red-dark)) 80%, rgba(255,255,255,0.15) 20%);
+}
+
+.history-compact-row:active {
+  transform: scale(0.995);
+}
+
+.history-compact-row__thumb {
+  width: 40px;
+  height: 28px;
+  border-radius: 5px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.07);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--grey-muted);
+}
+
+.history-compact-row__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.history-compact-row__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.history-compact-row__title {
+  font-size: 13px;
+  color: var(--proj-pill-text, var(--white));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.history-compact-row__channel {
+  font-size: 12px;
+  color: var(--proj-bright-sub, var(--grey-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 28%;
+}
+
+.history-compact-row__quality {
+  font-size: 11px;
+  color: var(--proj-bright, var(--red-bright));
+  background: var(--proj-subtle, rgba(226,0,0,0.12));
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.history-compact-row__date {
+  font-size: 11px;
+  color: var(--proj-bright-sub, var(--grey-muted));
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   Detail modal (grid + compact)
+   ============================================================ */
+
+.history-detail-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.65);
+  opacity: 0;
+  transition: opacity 220ms var(--ease);
+  padding: 28px 24px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.history-detail-modal-backdrop.visible {
+  opacity: 1;
+}
+
+.history-detail-modal-panel {
+  width: 100%;
+  max-width: 680px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  transform: translateY(14px);
+  transition: transform 300ms var(--spring);
+  scrollbar-width: thin;
+}
+
+.history-detail-modal-backdrop.visible .history-detail-modal-panel {
+  transform: translateY(0);
+}
+
+/* Close button sits on the backdrop (not inside the panel) so it
+   remains visible regardless of how far the user scrolls the panel */
+.history-detail-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(30,0,0,0.75);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--grey-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 150ms var(--ease), color 150ms var(--ease), transform 150ms var(--spring);
+}
+
+.history-detail-modal-close:hover {
+  background: rgba(226,0,0,0.5);
+  color: var(--white);
+  transform: scale(1.08);
+}
+
+/* Inside modal: force entry expanded, no chevron */
+.history-detail-modal-panel .history-entry__chevron {
+  display: none;
+}
+
+.history-detail-modal-panel .history-entry {
+  animation: none;
 }
 
 /* ---- Empty state ---- */
@@ -2576,3 +3215,658 @@ input, button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ============================================================
+   Theme Toggle — dark / auto / light icon-button group
+   ============================================================ */
+
+.theme-toggle {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.theme-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--grey-muted);
+  cursor: pointer;
+  transition:
+    background 200ms var(--ease),
+    color 200ms var(--ease),
+    transform 150ms var(--spring);
+}
+
+.theme-btn:hover:not(.active) {
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.theme-btn:active {
+  transform: scale(0.88);
+}
+
+.theme-btn.active {
+  background: var(--red-bright);
+  color: var(--white);
+}
+
+/* Light mode overrides for the toggle */
+html.light-mode .theme-toggle {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+html.light-mode .theme-btn:hover:not(.active) {
+  color: var(--red-bright);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+html.light-mode .theme-btn.active {
+  background: var(--red-bright);
+  color: #ffffff;
+}
+
+/* ============================================================
+   Light Mode — override transparent-background elements only
+   Has zero effect in dark mode.
+   ============================================================ */
+
+/* ---- Light mode — applied via html.light-mode class (see renderer.js applyTheme) ---- */
+
+/* Override core brand variables so every var(--red-dark) surface
+   becomes warm pastel pink, and muted text stays readable. */
+html.light-mode {
+  --red-dark:   hsl(0, 68%, 80%);
+  --grey-muted: hsl(0, 25%, 44%);
+}
+
+/* ---- White text that now sits on the pink containers ---- */
+html.light-mode .settings-label { color: var(--red-bright); }
+html.light-mode .settings-version { color: var(--red-bright); }
+html.light-mode .queue-panel__title { color: var(--red-bright); }
+html.light-mode .queue-panel__clear { color: var(--red-bright); }
+html.light-mode .queue-panel__clear:hover {
+  color: var(--red-bright);
+  background: rgba(0, 0, 0, 0.07);
+}
+html.light-mode .queue-item__title { color: #111111; }
+html.light-mode .help-popover__heading { color: var(--red-bright); }
+
+/* ---- rgba-white subtle bg → rgba-black ---- */
+html.light-mode .settings-divider { background: rgba(0, 0, 0, 0.1); }
+html.light-mode .toggle { background: rgba(0, 0, 0, 0.14); }
+html.light-mode .toggle.active { background: var(--red-bright); }
+html.light-mode .queue-item { background: rgba(0, 0, 0, 0.05); }
+html.light-mode .queue-item__bar { background: rgba(0, 0, 0, 0.08); }
+html.light-mode .queue-item__action {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--red-bright);
+}
+html.light-mode .queue-item__action:hover {
+  background: rgba(0, 0, 0, 0.13);
+  color: var(--red-bright);
+}
+
+/* ---- Help chips ---- */
+html.light-mode .help-chip {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--red-bright);
+}
+
+/* ---- Quality dropdown (hardcoded background) ---- */
+html.light-mode .quality-dropdown {
+  background: hsl(0, 68%, 80%);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+html.light-mode .quality-dropdown__item { color: #111111; }
+
+html.light-mode .quality-dropdown__item:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+html.light-mode .quality-dropdown__item.active {
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--red-bright);
+}
+
+/* ---- Status toasts — light tint bg, darkened text for contrast (WCAG AA) ---- */
+html.light-mode .status-message.error   { background: rgba(255,  69, 58, 0.12); color: hsl(  3, 75%, 30%); }
+html.light-mode .status-message.success { background: rgba( 48, 209, 88, 0.12); color: hsl(140, 65%, 22%); }
+html.light-mode .status-message.warning { background: rgba(255, 214, 10, 0.14); color: hsl( 38, 100%, 25%); }
+html.light-mode .status-message.info    { background: rgba(  0,   0,  0, 0.07); color: #111111; }
+
+/* URL row border: white is invisible on a light vibrancy bg */
+html.light-mode .url-row {
+  border-color: rgba(0, 0, 0, 0.75);
+}
+
+html.light-mode .url-row:focus-within {
+  border-color: var(--red-bright);
+}
+
+/* URL input text */
+html.light-mode .url-input {
+  color: #111111;
+}
+
+html.light-mode .url-input::placeholder {
+  color: #888888;
+}
+
+/* Secondary text sitting on the transparent app background */
+html.light-mode .path-display {
+  color: #444444;
+}
+
+html.light-mode .url-hint {
+  color: #555555;
+}
+
+html.light-mode .url-hint.clipboard {
+  color: #111111;
+}
+
+html.light-mode .clip-range__separator {
+  color: #555555;
+}
+
+/* Logo is all-red — no backing pill needed in light mode */
+
+/* ---- Controls & video card ---- */
+
+/* Video card — solid project colour (same token as history cards) */
+html.light-mode .video-card {
+  background: var(--proj-light-bg, hsl(0, 52%, 62%));
+}
+
+/* ---- Project selector ---- */
+
+/* "No project" button */
+html.light-mode .project-btn {
+  background: rgba(226, 0, 0, 0.1);
+  color: var(--red-bright);
+  border: 1px solid rgba(226, 0, 0, 0.22);
+}
+
+html.light-mode .project-btn:hover {
+  background: rgba(226, 0, 0, 0.18);
+  color: var(--red-bright);
+}
+
+/* Active project pill — pastel fill, dark saturated text (matches reference) */
+html.light-mode .project-pill {
+  background: var(--proj-light-bg, rgba(226, 0, 0, 0.35));
+  color: var(--proj-light-text, #6b0000);
+}
+
+html.light-mode .project-pill__clear {
+  color: var(--proj-light-text, #6b0000);
+}
+
+/* Project dropdown panel */
+html.light-mode .project-dropdown {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+html.light-mode .project-dropdown__input {
+  background: rgba(0, 0, 0, 0.05);
+  color: #111111;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+html.light-mode .project-dropdown__input:focus {
+  border-color: var(--red-bright);
+}
+
+html.light-mode .project-dropdown__input::placeholder {
+  color: #888888;
+}
+
+html.light-mode .project-dropdown__item {
+  color: #111111;
+}
+
+html.light-mode .project-dropdown__item:hover {
+  background: var(--proj-hover, rgba(226, 0, 0, 0.1));
+  color: var(--proj-light-text, var(--red-bright));
+}
+
+html.light-mode .project-dropdown__item.active {
+  background: var(--proj-light-bg, rgba(226, 0, 0, 0.2));
+  color: var(--proj-light-text, #6b0000);
+}
+
+html.light-mode .project-dropdown__item-count {
+  color: #777777;
+}
+
+html.light-mode .project-dropdown__item.active .project-dropdown__item-count {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+html.light-mode .project-dropdown__hint {
+  color: #777777;
+}
+
+html.light-mode .project-dropdown__empty {
+  color: #777777;
+}
+
+/* ---- History view ---- */
+
+html.light-mode .history-view {
+  background: rgba(245, 245, 245, 0.97);
+}
+
+/* Header */
+html.light-mode .history-back {
+  background: rgba(0, 0, 0, 0.07);
+  color: #111111;
+}
+
+html.light-mode .history-back:hover {
+  background: rgba(0, 0, 0, 0.13);
+}
+
+html.light-mode .history-title {
+  color: #111111;
+}
+
+html.light-mode .history-export-btn {
+  color: var(--red-bright);
+  background: rgba(226, 0, 0, 0.08);
+  border-color: rgba(226, 0, 0, 0.22);
+}
+
+html.light-mode .history-export-btn:hover {
+  background: rgba(226, 0, 0, 0.14);
+  border-color: rgba(226, 0, 0, 0.38);
+}
+
+html.light-mode .history-clear-btn {
+  background: rgba(0, 0, 0, 0.06);
+  color: #666666;
+}
+
+html.light-mode .history-clear-btn:hover {
+  color: var(--color-error);
+}
+
+html.light-mode .history-clear-btn.confirm {
+  color: var(--color-error);
+  background: rgba(255, 69, 58, 0.12);
+}
+
+/* Toolbar */
+html.light-mode .history-search {
+  background: rgba(0, 0, 0, 0.06);
+  color: #111111;
+  border-color: transparent;
+}
+
+html.light-mode .history-search::placeholder {
+  color: #888888;
+}
+
+html.light-mode .history-search:focus {
+  border-color: var(--red-bright);
+}
+
+html.light-mode .history-filters {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+html.light-mode .history-filter {
+  color: #666666;
+}
+
+html.light-mode .history-filter:not(.active):hover {
+  color: #111111;
+}
+
+html.light-mode .history-filter[data-filter].active {
+  background: transparent;
+  color: hsl(0, 100%, 84%);
+}
+
+html.light-mode .history-filter:not([data-filter]).active {
+  background: var(--proj-light-bg, var(--red-bright));
+  color: var(--proj-light-text, #ffffff);
+}
+
+/* Sort row */
+html.light-mode .history-count {
+  color: #777777;
+}
+
+html.light-mode .history-sort-btn {
+  color: #777777;
+}
+
+html.light-mode .history-sort-btn:hover {
+  color: #111111;
+}
+
+/* Entry cards — use project pastel bg when available, white fallback */
+html.light-mode .history-entry {
+  background: var(--proj-light-bg, #ffffff);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+html.light-mode .history-entry__header:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+html.light-mode .history-entry__title {
+  color: var(--proj-light-text, #111111);
+}
+
+html.light-mode .history-entry__meta {
+  color: var(--proj-light-text, #666666);
+  opacity: 0.75;
+}
+
+html.light-mode .history-entry__quality {
+  color: var(--proj-light-text, var(--red-bright));
+  background: rgba(0, 0, 0, 0.1);
+}
+
+html.light-mode .history-entry__project {
+  color: var(--proj-light-text, #333333);
+  background: color-mix(in srgb, var(--proj-light-text, #333333) 14%, transparent);
+}
+
+html.light-mode .history-entry__date {
+  color: var(--proj-light-text, #888888);
+  opacity: 0.65;
+}
+
+html.light-mode .history-entry__chevron {
+  color: var(--proj-light-text, #999999);
+  opacity: 0.5;
+}
+
+html.light-mode .history-entry__platform {
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--proj-light-text, #666666);
+}
+
+/* Expanded detail */
+html.light-mode .history-entry__detail-divider {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+html.light-mode .history-detail-grid dt {
+  color: var(--proj-light-text, #777777);
+  opacity: 0.65;
+}
+
+html.light-mode .history-detail-grid dd {
+  color: var(--proj-light-text, #111111);
+}
+
+html.light-mode .history-detail-grid dd.muted {
+  color: var(--proj-light-text, #888888);
+  opacity: 0.6;
+}
+
+html.light-mode .history-detail-grid dd.file-link {
+  color: var(--proj-light-text, var(--red-bright));
+}
+
+html.light-mode .history-detail-grid dd.file-link.missing {
+  color: #aaaaaa;
+  text-decoration-color: #aaaaaa;
+}
+
+html.light-mode .history-copy-row-btn:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: #111111;
+}
+
+/* Detail action buttons — inherit project text colour so they read on any card bg */
+html.light-mode .history-action-btn--copy,
+html.light-mode .history-action-btn--copyinfo {
+  color: var(--proj-light-text, var(--red-bright));
+  border-color: color-mix(in srgb, var(--proj-light-text, var(--red-bright)) 40%, transparent);
+}
+
+html.light-mode .history-action-btn--delete,
+html.light-mode .history-action-btn--open {
+  color: var(--proj-light-text, #555555);
+  border-color: color-mix(in srgb, var(--proj-light-text, #555555) 30%, transparent);
+}
+
+html.light-mode .history-action-btn--delete:hover {
+  color: var(--color-error);
+  border-color: rgba(255, 69, 58, 0.35);
+}
+
+/* Empty state */
+html.light-mode .history-empty {
+  color: #888888;
+}
+
+/* Project filter dropdown */
+html.light-mode .history-project-menu {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+html.light-mode .history-project-menu__item {
+  color: #111111;
+}
+
+html.light-mode .history-project-menu__item:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #111111;
+}
+
+html.light-mode .history-project-menu__item.active {
+  background: var(--proj-light-bg, var(--red-bright));
+  color: var(--proj-light-text, #ffffff);
+}
+
+/* Scrollbar inside history list */
+html.light-mode .history-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* ---- View toggle buttons ---- */
+html.light-mode .history-view-btn {
+  color: #888888;
+}
+
+html.light-mode .history-view-btn:hover {
+  color: #111111;
+  background: rgba(0, 0, 0, 0.07);
+}
+
+html.light-mode .history-view-btn.active {
+  color: var(--red-bright);
+  background: rgba(226, 0, 0, 0.1);
+}
+
+/* ---- List view thumbnail ---- */
+html.light-mode .history-entry__thumb {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+html.light-mode .history-entry__thumb.history-thumb--placeholder {
+  background: var(--proj-light-bg, var(--red-dark));
+  color: var(--proj-light-text, var(--red-bright));
+}
+
+/* ---- Grid view ---- */
+html.light-mode .history-grid-card {
+  background: var(--proj-light-bg, #ffffff);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.1);
+}
+
+html.light-mode .history-grid-card__thumb {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+html.light-mode .history-grid-card__thumb.history-thumb--placeholder {
+  background: var(--proj-light-bg, var(--red-dark));
+  color: var(--proj-light-text, var(--red-bright));
+}
+
+html.light-mode .history-grid-card__title {
+  color: var(--proj-light-text, #111111);
+}
+
+html.light-mode .history-grid-card__meta {
+  color: var(--proj-light-text, #666666);
+  opacity: 0.75;
+}
+
+html.light-mode .history-grid-card__quality {
+  color: var(--proj-light-text, var(--red-bright));
+  background: rgba(0, 0, 0, 0.09);
+}
+
+/* ---- Compact view ---- */
+html.light-mode .history-compact-row {
+  background: var(--proj-light-bg, #ffffff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+}
+
+html.light-mode .history-compact-row:hover {
+  background: color-mix(in srgb, var(--proj-light-bg, #ffffff) 80%, rgba(0,0,0,0.1) 20%);
+}
+
+html.light-mode .history-compact-row__thumb {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+html.light-mode .history-compact-row__thumb.history-thumb--placeholder {
+  background: var(--proj-light-bg, var(--red-dark));
+  color: var(--proj-light-text, var(--red-bright));
+}
+
+html.light-mode .history-compact-row__title {
+  color: var(--proj-light-text, #111111);
+}
+
+html.light-mode .history-compact-row__channel {
+  color: var(--proj-light-text, #666666);
+  opacity: 0.7;
+}
+
+html.light-mode .history-compact-row__quality {
+  color: var(--proj-light-text, var(--red-bright));
+  background: rgba(0, 0, 0, 0.09);
+}
+
+html.light-mode .history-compact-row__date {
+  color: var(--proj-light-text, #888888);
+  opacity: 0.65;
+}
+
+/* ---- Detail modal ---- */
+html.light-mode .history-detail-modal-backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+html.light-mode .history-detail-modal-close {
+  background: rgba(0, 0, 0, 0.1);
+  color: #555555;
+}
+
+html.light-mode .history-detail-modal-close:hover {
+  background: rgba(0, 0, 0, 0.18);
+  color: #111111;
+}
+
+/* ---- Global scrollbar ---- */
+html.light-mode ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* ---- Elements with white text on --red-bright backgrounds ---- */
+/* Use light salmon so there's no white-on-saturated-red in light mode */
+html.light-mode .btn-download,
+html.light-mode .quality-option.active,
+html.light-mode .settings-action-btn,
+html.light-mode .history-action-btn--reveal,
+html.light-mode .history-action-btn--redownload,
+html.light-mode .queue-badge {
+  color: hsl(0, 100%, 84%);
+}
+
+/* ---- btn-hint — dark pill so it pops on light vibrancy bg ---- */
+html.light-mode .btn-hint {
+  background: rgba(0, 0, 0, 0.72);
+  color: #ffffff;
+}
+
+/* ---- Video card text — light-mode tokens, not dark-mode accent colours ---- */
+html.light-mode .video-card__title {
+  color: var(--proj-light-text, #111111);
+}
+
+html.light-mode .video-card__meta,
+html.light-mode .video-card__qualities {
+  color: var(--proj-light-text, var(--grey-muted));
+  opacity: 0.75;
+}
+
+/* ---- Shimmer skeleton — dark text colour at low opacity so bars are visible on light card ---- */
+html.light-mode .video-card.loading .video-card__thumb-wrap,
+html.light-mode .video-card.loading .video-card__title,
+html.light-mode .video-card.loading .video-card__meta {
+  background-color: color-mix(in srgb, var(--proj-light-text, #1a1a1a) 14%, transparent);
+  background-image: linear-gradient(90deg,
+    color-mix(in srgb, var(--proj-light-text, #1a1a1a) 10%, transparent) 25%,
+    color-mix(in srgb, var(--proj-light-text, #1a1a1a) 22%, transparent) 50%,
+    color-mix(in srgb, var(--proj-light-text, #1a1a1a) 10%, transparent) 75%);
+}
+
+/* ---- Carousel card — white text on pastel pink bg ---- */
+html.light-mode .carousel-card__title {
+  color: #111111;
+}
+
+html.light-mode .carousel-card__count {
+  color: var(--grey-muted);
+}
+
+/* ---- Queue show-file badge — stand out on pink panel bg ---- */
+html.light-mode .queue-item__show-file {
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--red-bright);
+}
+
+/* ---- Drop overlay — lighter tinted scrim ---- */
+html.light-mode .drop-overlay {
+  background: rgba(226, 0, 0, 0.4);
+}
+
+/* ---- Activity toast — light amber instead of near-black ---- */
+html.light-mode .activity-toast {
+  background: hsl(42, 90%, 88%);
+  color: hsl(42, 100%, 26%);
+}
+
+html.light-mode .activity-toast__spinner {
+  color: hsl(42, 100%, 26%);
+}
+
+html.light-mode .activity-toast.done {
+  color: var(--color-success);
+}
+
+html.light-mode .activity-toast.done .activity-toast__spinner {
+  color: var(--color-success);
+}
+

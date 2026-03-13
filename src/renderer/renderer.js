@@ -8,16 +8,20 @@ const state = {
   isFetchingInfo: false,
   lastDownloadedFile: null,
   selectedQuality: 'best',
+  selectedResolutionHeight: null,
+  qualityDropdownOpen: false,
   downloadPath: '',
   lastClipboardUrl: '',
   settingsOpen: false,
   autoPaste: true,
   showInFinder: false,
+  instantDownload: false,
   queueOpen: false,
   historyOpen: false,
   historyData: [],
   historyFilter: 'all',
   historySortNewest: true,
+  historyViewMode: localStorage.getItem('historyViewMode') || 'list',
   historySearchTerm: '',
   carouselData: null,
   carouselSelected: new Set(),
@@ -28,6 +32,7 @@ const state = {
   projectDropdownOpen: false,
   historyProjectFilter: null,
   helpOpen: false,
+  theme: 'auto',
 };
 
 /* ============================================================
@@ -48,6 +53,12 @@ const startTime = $('#startTime');
 const endTime = $('#endTime');
 const qualitySelector = $('#qualitySelector');
 const pillIndicator = $('#pillIndicator');
+const historyFilterPill = $('#historyFilterPill');
+const qualityBtnLabel = $('#qualityBtnLabel');
+const qualityChevron = $('#qualityChevron');
+const qualityDropdown = $('#qualityDropdown');
+const qualityDropdownList = $('#qualityDropdownList');
+const qualityBackdrop = $('#qualityBackdrop');
 const pathDisplay = $('#pathDisplay');
 const downloadBtn = $('#downloadBtn');
 const statusMessage = $('#statusMessage');
@@ -59,6 +70,7 @@ const settingsPopover = $('#settingsPopover');
 const settingsBackdrop = $('#settingsBackdrop');
 const autoPasteToggle = $('#autoPasteToggle');
 const showInFinderToggle = $('#showInFinderToggle');
+const instantDownloadToggle = $('#instantDownloadToggle');
 const modeToggle = $('#modeToggle');
 const updateYtdlpBtn = $('#updateYtdlpBtn');
 const updateStatus = $('#updateStatus');
@@ -67,12 +79,14 @@ const appUpdateBtn = $('#appUpdateBtn');
 const historyBtn = $('#historyBtn');
 const historyView = $('#historyView');
 const historyBack = $('#historyBack');
+const historyExportBtn = $('#historyExportBtn');
 const historyClearBtn = $('#historyClearBtn');
 const historySearch = $('#historySearch');
 const historyList = $('#historyList');
 const historyEmpty = $('#historyEmpty');
 const historyCount = $('#historyCount');
 const historySortBtn = $('#historySortBtn');
+const historyViewToggles = document.querySelector('.history-view-toggles');
 const queueBtn = $('#queueBtn');
 const queuePanel = $('#queuePanel');
 const queueList = $('#queueList');
@@ -104,9 +118,90 @@ const historyProjectBtn = $('#historyProjectBtn');
 const historyProjectMenu = $('#historyProjectMenu');
 const helpBtn = $('#helpBtn');
 const helpPopover = $('#helpPopover');
+const themeToggle = $('#themeToggle');
 const activityToast = $('#activityToast');
 const activitySpinner = document.querySelector('.activity-toast__spinner');
 const activityText = $('#activityText');
+
+/* ============================================================
+   Tooltip
+   ============================================================ */
+
+(function () {
+  const tip = document.getElementById('tooltip');
+  if (!tip) return;
+
+  let showTimer = null;
+
+  function show(el) {
+    tip.textContent = el.dataset.tooltip;
+    tip.classList.remove('visible');
+
+    // Measure at top-left off-screen so getBoundingClientRect is accurate
+    tip.style.left = '0px';
+    tip.style.top  = '0px';
+
+    const r  = el.getBoundingClientRect();
+    const GAP = 8;
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+
+    let left = r.left;
+    let top  = r.bottom + GAP;
+
+    // Clamp right edge
+    if (left + tw > window.innerWidth - 8) left = window.innerWidth - tw - 8;
+    // Flip above if it would overflow the bottom
+    if (top + th > window.innerHeight - 8) top = r.top - th - GAP;
+
+    tip.style.left = left + 'px';
+    tip.style.top  = top  + 'px';
+    tip.classList.add('visible');
+  }
+
+  function hide() {
+    clearTimeout(showTimer);
+    tip.classList.remove('visible');
+  }
+
+  document.querySelectorAll('[data-tooltip]').forEach(el => {
+    el.addEventListener('mouseenter', () => {
+      clearTimeout(showTimer);
+      showTimer = setTimeout(() => show(el), 500);
+    });
+    el.addEventListener('mouseleave', hide);
+    el.addEventListener('click', hide);
+  });
+})();
+
+/* ============================================================
+   Theme
+   ============================================================ */
+
+const systemLight = window.matchMedia('(prefers-color-scheme: light)');
+
+function applyTheme(theme) {
+  const isLight = theme === 'light' ||
+    (theme === 'auto' && systemLight.matches);
+  document.documentElement.classList.toggle('light-mode', isLight);
+  if (themeToggle) {
+    themeToggle.querySelectorAll('.theme-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.theme === theme);
+    });
+  }
+}
+
+systemLight.addEventListener('change', () => {
+  if (state.theme === 'auto') applyTheme('auto');
+});
+
+themeToggle?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.theme-btn');
+  if (!btn) return;
+  state.theme = btn.dataset.theme;
+  applyTheme(state.theme);
+  window.api.setSetting('theme', state.theme);
+});
 
 /* ============================================================
    Helpers
@@ -139,6 +234,26 @@ function isTiktokPhotoUrl(url) {
   return /\/photo\//.test(url.trim());
 }
 
+function brightTextColor(hue) {
+  // Compute relative luminance of hsl(hue, 85%, 48%) to pick a readable foreground.
+  // Returns dark text for high-luminance hues (green, yellow, cyan) and white for dark hues.
+  const s = 0.85, l = 0.48;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if      (hue < 60)  { r = c; g = x; b = 0; }
+  else if (hue < 120) { r = x; g = c; b = 0; }
+  else if (hue < 180) { r = 0; g = c; b = x; }
+  else if (hue < 240) { r = 0; g = x; b = c; }
+  else if (hue < 300) { r = x; g = 0; b = c; }
+  else                { r = c; g = 0; b = x; }
+  r += m; g += m; b += m;
+  const lin = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return lum > 0.179 ? '#12120f' : '#ffffff';
+}
+
 function projectColors(name) {
   let hue = state.projectHues?.[name];
   if (hue == null) {
@@ -147,10 +262,17 @@ function projectColors(name) {
     hue = (h % 280) + 40;
   }
   return {
-    bright: `hsl(${hue}, 85%, 48%)`,
-    dark:   `hsl(${hue}, 60%, 13%)`,
-    subtle: `hsla(${hue}, 85%, 48%, 0.15)`,
-    hover:  `hsla(${hue}, 85%, 48%, 0.15)`,
+    bright:     `hsl(${hue}, 85%, 48%)`,
+    dark:       `hsl(${hue}, 60%, 13%)`,
+    subtle:     `hsla(${hue}, 85%, 48%, 0.15)`,
+    hover:      `hsla(${hue}, 85%, 48%, 0.15)`,
+    brightSub:  `hsla(${hue}, 45%, 65%, 0.75)`,
+    shimmerLo:  `hsla(${hue}, 85%, 48%, 0.06)`,
+    shimmerHi:  `hsla(${hue}, 85%, 48%, 0.14)`,
+    onBright:   brightTextColor(hue),
+    pillText:   `hsl(${hue}, 100%, 76%)`,
+    lightBg:    `hsl(${hue}, 50%, 70%)`,
+    lightText:  `hsl(${hue}, 90%, 15%)`,
   };
 }
 
@@ -267,17 +389,21 @@ const PROFESSIONAL_STRINGS = new Map([
   ['Copy Info', 'Copy Info'],
   ['Copy URL', 'Copy URL'],
   ['Drop a link here', 'Drop a link here'],
-  ['File was moved or deleted — opened download folder', 'File not found. Opened the download folder.'],
+  ['File was moved or deleted. Opened the download folder.', 'File not found. Opened the download folder.'],
   ['Name this project, fam', 'Enter a project name'],
   ['Add new project', 'Add new project'],
   ['No projects yet. Type one in, genius.', 'No projects yet. Enter a name to create one.'],
   ['Hold tight, making sure everything works…', 'Running background checks…'],
-  ['First-time setup — downloading engine…', 'Setting up — downloading engine…'],
+  ['First-time setup: downloading engine…', 'Setting up: downloading engine…'],
   ['Downloading latest version…', 'Downloading latest version…'],
   ['Done!', 'Done!'],
   ['Something went wrong', 'Something went wrong'],
   ['Couldn\'t reach the server. Check your connection.', 'Could not reach the server. Check your connection.'],
   ['All systems go, baby', 'Ready'],
+  ['Instant Download', 'Instant Download'],
+  ['Ready: click Instant Download', 'Ready: click Instant Download'],
+  ['Instant Downloads on: paste a link and hit download, no waiting', 'Instant Downloads enabled: paste a URL and download immediately, no scan required'],
+  ['Instant Downloads off: links will scan first so you can preview and confirm', 'Instant Downloads disabled: links will be scanned before downloading'],
 ]);
 
 const PROFESSIONAL_TEMPLATES = {
@@ -318,7 +444,7 @@ function applyMode() {
 
   urlInput.placeholder = t('Hurry up and paste a link, my ninja');
 
-  if (!state.videoInfo && !state.carouselData) {
+  if (!state.videoInfo && !state.carouselData && !state.instantDownload) {
     downloadBtn.textContent = t('Download This Shit');
   }
 
@@ -403,6 +529,7 @@ function openQueue() {
   closeSettings();
   closeProjectDropdown();
   closeHelp();
+  closeQualityDropdown();
 }
 
 function closeQueue() {
@@ -442,6 +569,17 @@ function updateQueueEmpty() {
   queueClearDone.style.display = hasDone ? '' : 'none';
 }
 
+function applyQueueItemProjectColors(el) {
+  if (!state.activeProject) return;
+  const c = projectColors(state.activeProject);
+  el.style.setProperty('--proj-dark', c.dark);
+  el.style.setProperty('--proj-bright', c.bright);
+  el.style.setProperty('--proj-bright-sub', c.brightSub);
+  el.style.setProperty('--proj-subtle', c.subtle);
+  el.style.setProperty('--proj-light-bg', c.lightBg);
+  el.style.setProperty('--proj-light-text', c.lightText);
+}
+
 function addDownloadToQueue(id, title, quality) {
   state.downloads.set(id, {
     id, title, quality,
@@ -466,6 +604,7 @@ function addDownloadToQueue(id, title, quality) {
     </div>
   `;
 
+  applyQueueItemProjectColors(el);
   queueList.prepend(el);
   queueElements.set(id, el);
 
@@ -499,11 +638,12 @@ function updateQueueItem(id) {
       if (dl.percent >= 99.5) {
         fill.classList.add('processing');
         const STATUS_LABELS = {
-          merging:          t('Stitching video and audio together, chill...'),
-          converting_mac:   t('Making it work on your fancy Mac...'),
-          converting_sw:    t('Software converting, this ones gonna take a sec...'),
-          extracting_audio: t('Ripping the audio out, one sec...'),
-          still_working:    t('Still cookin, hang tight...'),
+          merging:           t('Stitching video and audio together, chill...'),
+          converting_mac:    t('Making it work on your fancy Mac...'),
+          converting_sw:     t('Software converting, this ones gonna take a sec...'),
+          extracting_audio:  t('Ripping the audio out, one sec...'),
+          converting_audio:  t('Re-encoding audio for compatibility...'),
+          still_working:     t('Still cookin, hang tight...'),
         };
         const statusMsg = STATUS_LABELS[dl.statusKey] || t('Processing clip, sit your ass down...');
         let stats = '';
@@ -649,6 +789,32 @@ function updatePillPosition(animate) {
 }
 
 /* ============================================================
+   History Filter Pill Animation
+   ============================================================ */
+
+function updateHistoryFilterPill(animate = true) {
+  const container = document.querySelector('.history-filters');
+  const activeBtn = container?.querySelector('.history-filter[data-filter].active');
+  if (!activeBtn || !historyFilterPill) return;
+
+  const barRect = container.getBoundingClientRect();
+  const btnRect = activeBtn.getBoundingClientRect();
+  const offsetLeft = btnRect.left - barRect.left;
+
+  if (!animate) {
+    historyFilterPill.style.transition = 'none';
+  }
+
+  historyFilterPill.style.width = btnRect.width + 'px';
+  historyFilterPill.style.transform = `translateX(${offsetLeft - 4}px)`;
+
+  if (!animate) {
+    historyFilterPill.offsetHeight;
+    historyFilterPill.style.transition = '';
+  }
+}
+
+/* ============================================================
    Settings Popover (with backdrop for click-outside dismiss)
    ============================================================ */
 
@@ -657,6 +823,7 @@ function openSettings() {
   closeQueue();
   closeProjectDropdown();
   closeHelp();
+  closeQualityDropdown();
   settingsPopover.classList.add('open');
   settingsBackdrop.classList.add('visible');
   settingsBtn.closest('.settings-anchor').classList.add('open');
@@ -691,6 +858,7 @@ function openHelp() {
   closeSettings();
   closeQueue();
   closeProjectDropdown();
+  closeQualityDropdown();
   helpPopover.classList.add('open');
   settingsBackdrop.classList.add('visible');
 }
@@ -863,8 +1031,14 @@ function updateDownloadBtnState() {
     downloadBtn.disabled = state.carouselSelected.size === 0 || state.isFetchingInfo;
     return;
   }
+  if (state.instantDownload) {
+    const url = urlInput.value.trim();
+    const validUrl = isValidURL(url) && !(detectPlatform(url) === 'tiktok' && isTiktokPhotoUrl(url));
+    downloadBtn.disabled = !validUrl || state.isFetchingInfo;
+    return;
+  }
   const hasVideo = !!state.videoInfo;
-  const timeValid = validateClipTimes();
+  const timeValid = validateClipTimes(true);
   downloadBtn.disabled = !hasVideo || !timeValid || state.isFetchingInfo;
 }
 
@@ -874,12 +1048,13 @@ function getDownloadDisabledReason() {
     if (state.carouselSelected.size === 0) return t('Select items to download');
   }
   if (state.isFetchingInfo) return t('Hold on, fetching video info...');
+  if (state.instantDownload) return t('Paste a URL first champ');
   if (!state.videoInfo) return t('Paste a URL first champ');
   if (!validateClipTimes()) return t('Fix clip times (start must be before end)');
   return t('Not ready yet');
 }
 
-function validateClipTimes() {
+function validateClipTimes(silent = false) {
   const startSec = parseTimeToSeconds(startTime.value);
   const endSec = parseTimeToSeconds(endTime.value);
 
@@ -891,12 +1066,12 @@ function validateClipTimes() {
   if (state.videoInfo) {
     if (startSec > state.videoInfo.duration) {
       startTime.classList.add('error');
-      shakeElement(startTime);
+      if (!silent) shakeElement(startTime);
       return false;
     }
     if (endSec > state.videoInfo.duration && endSec !== 0) {
       endTime.classList.add('error');
-      shakeElement(endTime);
+      if (!silent) shakeElement(endTime);
       return false;
     }
   }
@@ -904,8 +1079,10 @@ function validateClipTimes() {
   if (endSec !== 0 && startSec >= endSec) {
     startTime.classList.add('error');
     endTime.classList.add('error');
-    shakeElement(startTime);
-    shakeElement(endTime);
+    if (!silent) {
+      shakeElement(startTime);
+      shakeElement(endTime);
+    }
     return false;
   }
 
@@ -941,7 +1118,9 @@ function enforceTimeFormat(input) {
       h = parseInt(nums.slice(0, -4), 10) || 0;
     }
     input.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    // After formatting, run full validation with shake so user sees errors on blur
     updateDownloadBtnState();
+    validateClipTimes(false);
   });
 }
 
@@ -980,6 +1159,22 @@ async function handleUrlChange() {
   }
 
   urlRow.classList.remove('error');
+
+  // Instant download mode: skip scanning, enable download button immediately
+  if (state.instantDownload) {
+    if (state.videoInfo) {
+      // Clear any previously scanned video so we use the instant path in handleDownload
+      state.videoInfo = null;
+      videoCard.className = 'video-card';
+      startTime.disabled = true;
+      endTime.disabled = true;
+      hideCarousel();
+    }
+    urlHint.textContent = t('Ready: click Instant Download');
+    urlHint.classList.add('clipboard');
+    updateDownloadBtnState();
+    return;
+  }
 
   if (platform === 'instagram') {
     fetchDebounce = setTimeout(() => fetchInstagramContent(url), 300);
@@ -1025,7 +1220,7 @@ async function fetchInfo(url) {
     videoMeta.textContent = `${platformLabel}${durationPart}${info.uploader ? ` · ${info.uploader}` : ''}${sizeLabel}`;
 
     videoQualities.textContent = info.formats.length > 0
-      ? `Available: ${info.formats.join(', ')}`
+      ? `Available: ${info.formats.map(f => f.label).join(', ')}`
       : '';
 
     videoCard.className = 'video-card visible';
@@ -1171,7 +1366,7 @@ function fetchAndMergeCarouselVideos(url) {
     }
 
     updateCarouselCount();
-    urlHint.textContent = `Found ${videos.length} video${videos.length > 1 ? 's' : ''} — ${total} items total`;
+    urlHint.textContent = `Found ${videos.length} video${videos.length > 1 ? 's' : ''} · ${total} items total`;
     urlHint.classList.add('clipboard');
   }).catch(() => { /* yt-dlp failed silently, images-only carousel is fine */ });
 }
@@ -1376,6 +1571,7 @@ async function handleCarouselDownload() {
     </div>
   `;
 
+  applyQueueItemProjectColors(el);
   queueList.prepend(el);
   queueElements.set(queueId, el);
 
@@ -1445,7 +1641,7 @@ async function handleCarouselDownload() {
     const detail = el.querySelector('.queue-item__detail');
     const fill = el.querySelector('.queue-item__fill');
     if (fill) fill.className = 'queue-item__fill cancelled';
-    if (detail) detail.textContent = `Cancelled — ${downloadedCount} of ${total} saved`;
+    if (detail) detail.textContent = `Cancelled: ${downloadedCount} of ${total} saved`;
     el.className = 'queue-item cancelled';
   } else if (errorCount > 0 && downloadedCount === 0) {
     if (dl) { dl.status = 'error'; dl.error = `All ${errorCount} items failed`; }
@@ -1517,9 +1713,133 @@ statusRetry.addEventListener('click', () => {
    Download
    ============================================================ */
 
+async function handleInstantInstagramDownload(url) {
+  state.isFetchingInfo = true;
+  downloadBtn.disabled = true;
+  downloadBtn.textContent = t('Hold on, fetching...');
+
+  try {
+    const mediaInfo = await window.api.fetchMediaInfo(url);
+
+    if (!mediaInfo || !mediaInfo.items || mediaInfo.items.length === 0) {
+      showStatus('error', t('Couldn\'t fetch this Instagram post. It may be private or require login.'));
+      return;
+    }
+
+    const owner = mediaInfo.owner || 'unknown';
+    const caption = mediaInfo.caption || '';
+
+    if (mediaInfo.isCarousel && mediaInfo.items.length > 1) {
+      // Auto-select and download all carousel items
+      state.carouselData = { items: mediaInfo.items, owner, caption, webpageUrl: url };
+      state.carouselSelected = new Set(mediaInfo.items.map((_, i) => i));
+      state.isFetchingInfo = false;
+      await handleCarouselDownload();
+      state.carouselData = null;
+      state.carouselSelected = new Set();
+      return;
+    }
+
+    const singleItem = mediaInfo.items[0];
+    const title = caption
+      ? caption.slice(0, 80)
+      : (singleItem.type === 'video'
+          ? `Instagram reel by @${owner}`
+          : `Instagram post by @${owner}`);
+    const mediaType = singleItem.type === 'video' ? 'video' : 'image';
+    const queueId = `${mediaType === 'video' ? 'reel' : 'img'}-${Date.now()}`;
+
+    addDownloadToQueue(queueId, title, 'best');
+    if (!state.queueOpen) openQueue();
+    downloadBtn.classList.add('kick');
+    downloadBtn.addEventListener('animationend', () => downloadBtn.classList.remove('kick'), { once: true });
+
+    const dl = state.downloads.get(queueId);
+    if (dl) { dl.status = 'downloading'; dl.percent = 0; }
+    const pm = progressManagers.get(queueId);
+    if (pm) pm.set(mediaType === 'video' ? 15 : 30);
+    updateQueueItem(queueId);
+
+    try {
+      if (mediaType === 'video' && pm) pm.set(40);
+      const result = await window.api.downloadImage({
+        url: singleItem.url,
+        filename: title,
+        title,
+        postOwner: owner,
+        caption,
+        webpageUrl: url,
+        outputPath: state.downloadPath,
+        mediaType,
+      });
+      if (dl) { dl.status = 'complete'; dl.percent = 100; dl.filePath = result.filePath; }
+      if (pm) {
+        pm.finish();
+        setTimeout(() => { pm.stop(); progressManagers.delete(queueId); updateQueueItem(queueId); }, 600);
+      } else {
+        updateQueueItem(queueId);
+      }
+    } catch (err) {
+      if (dl) { dl.status = 'error'; dl.error = err.message || `Failed to download ${mediaType}.`; }
+      if (pm) pm.stop();
+      progressManagers.delete(queueId);
+      updateQueueItem(queueId);
+      showStatus('error', err.message || `Failed to download ${mediaType}.`);
+    }
+  } catch (err) {
+    showStatus('error', err.message || 'Failed to fetch Instagram content. It may be private or require login.');
+  } finally {
+    state.isFetchingInfo = false;
+    updateDownloadBtnLabel();
+    updateDownloadBtnState();
+  }
+}
+
 async function handleDownload() {
   if (state.carouselData && state.carouselSelected.size > 0) {
     await handleCarouselDownload();
+    return;
+  }
+
+  // Instant download mode: download directly without prior scan
+  if (state.instantDownload && !state.videoInfo) {
+    const url = urlInput.value.trim();
+    const platform = detectPlatform(url);
+
+    if (platform === 'instagram') {
+      await handleInstantInstagramDownload(url);
+      return;
+    }
+
+    // YouTube / TikTok — pass directly to yt-dlp
+    const activeCount = [...state.downloads.values()].filter(
+      d => d.status === 'preparing' || d.status === 'downloading'
+    ).length;
+    if (activeCount >= MAX_CONCURRENT) {
+      showStatus('warning', tp('maxConcurrent', MAX_CONCURRENT) || `Slow down, you greedy bastard! Max ${MAX_CONCURRENT} at once.`);
+      shakeElement(downloadBtn);
+      return;
+    }
+
+    hideStatus();
+    const platformTitle = platform === 'tiktok' ? 'TikTok video' : 'YouTube video';
+
+    try {
+      const result = await window.api.startDownload({
+        url,
+        quality: state.selectedQuality,
+        startTime: startTime.value,
+        endTime: endTime.value,
+        outputPath: state.downloadPath,
+        title: null,
+      });
+      addDownloadToQueue(result.id, platformTitle, state.selectedQuality);
+      downloadBtn.classList.add('kick');
+      downloadBtn.addEventListener('animationend', () => downloadBtn.classList.remove('kick'), { once: true });
+      if (!state.queueOpen) openQueue();
+    } catch (err) {
+      showStatus('error', err.message || t('Download crashed and burned, you buffoon. Try again.'));
+    }
     return;
   }
 
@@ -1699,6 +2019,12 @@ window.api.onDownloadComplete((data) => {
   dl.percent = 100;
   state.lastDownloadedFile = data.filePath;
 
+  // For instant downloads, the queue title is a placeholder — extract real title from filename
+  if (data.filePath && (dl.title === 'YouTube video' || dl.title === 'TikTok video')) {
+    const filename = data.filePath.split('/').pop().replace(/\.[^.]+$/, '');
+    if (filename) dl.title = filename;
+  }
+
   const pm = progressManagers.get(data.id);
   if (pm) {
     pm.finish();
@@ -1746,7 +2072,7 @@ window.api.onYtdlpUpdated((version) => {
 window.api.onBackgroundActivity((data) => {
   if (data.type === 'ytdlp-check') {
     if (data.status === 'downloading') {
-      showActivityToast(t('First-time setup — downloading engine…'));
+      showActivityToast(t('First-time setup: downloading engine…'));
     } else if (data.status === 'checking') {
       showActivityToast(t('Hold tight, making sure everything works…'));
     } else if (data.status === 'updated') {
@@ -1824,36 +2150,202 @@ document.addEventListener('drop', (e) => {
 });
 
 /* ============================================================
-   Quality Selector — context-adaptive labels
+   Quality Selector — context-adaptive labels + resolution dropdown
    ============================================================ */
 
-const DEFAULT_QUALITY_LABELS = ['Best / 4K', 'HD 1080p', 'Audio Only'];
+const PRESET_QUALITIES = [
+  { label: 'Best',   height: 'best' },
+  { label: '4K',     height: '2160' },
+  { label: '1440p',  height: '1440' },
+  { label: '1080p',  height: '1080' },
+  { label: '720p',   height: '720'  },
+  { label: '480p',   height: '480'  },
+];
+
+function qualityToLabel(quality) {
+  if (!quality || quality === 'best') return 'Best';
+  if (quality === 'audio') return 'Audio Only';
+  const h = parseInt(quality, 10);
+  if (h >= 2160) return '4K';
+  if (h >= 1440) return '1440p';
+  if (h >= 1080) return '1080p';
+  if (h >= 720)  return '720p';
+  if (h >= 480)  return '480p';
+  return `${h}p`;
+}
+
+// When "best" is selected, show "Best / 4K" so users know it adapts to the video
+function bestLabel(formats) {
+  return formats?.[0] ? `Best / ${formats[0].label}` : 'Best';
+}
+
+function buildPresetDropdown(selectedQuality) {
+  qualityDropdownList.innerHTML = '';
+  for (const preset of PRESET_QUALITIES) {
+    const isActive = preset.height === 'best'
+      ? (!selectedQuality || selectedQuality === 'best')
+      : String(selectedQuality) === preset.height;
+    const item = document.createElement('button');
+    item.className = 'quality-dropdown__item' + (isActive ? ' active' : '');
+    item.dataset.height = preset.height;
+    item.innerHTML = `
+      <span class="quality-dropdown__item-label">${preset.label}</span>
+      <i class="hgi-stroke hgi-tick-01 quality-dropdown__item-check" aria-hidden="true"></i>
+    `;
+    qualityDropdownList.appendChild(item);
+  }
+}
+
+function updateDownloadBtnLabel() {
+  if (state.instantDownload) {
+    downloadBtn.textContent = t('Instant Download');
+    return;
+  }
+  if (state.videoInfo?.mediaType === 'image') {
+    downloadBtn.textContent = t('Download Image');
+  } else if (state.videoInfo?._directVideoUrl) {
+    downloadBtn.textContent = t('Download Reel');
+  } else if (state.carouselData) {
+    const count = state.carouselSelected.size;
+    const total = state.carouselData.items.length;
+    downloadBtn.textContent = count > 0 ? `Download ${count} Item${count > 1 ? 's' : ''}` : t('Download This Shit');
+    carouselSelectAll.textContent = count === total ? t('Deselect All') : t('Select All');
+  } else {
+    downloadBtn.textContent = t('Download This Shit');
+  }
+}
+
+function openQualityDropdown() {
+  if (state.qualityDropdownOpen) return;
+  state.qualityDropdownOpen = true;
+  qualityDropdown.classList.add('visible');
+  qualityBackdrop.classList.add('visible');
+  qualityChevron.classList.add('open');
+}
+
+function closeQualityDropdown() {
+  if (!state.qualityDropdownOpen) return;
+  state.qualityDropdownOpen = false;
+  qualityDropdown.classList.remove('visible');
+  qualityBackdrop.classList.remove('visible');
+  qualityChevron.classList.remove('open');
+}
+
+function buildQualityDropdown(formats, selectedHeight) {
+  qualityDropdownList.innerHTML = '';
+
+  // "Best" option (auto highest quality)
+  const bestItem = document.createElement('button');
+  bestItem.className = 'quality-dropdown__item' + (selectedHeight === null ? ' active' : '');
+  bestItem.dataset.height = 'best';
+  bestItem.innerHTML = `
+    <span class="quality-dropdown__item-label">Best Available${formats[0] ? ` (${formats[0].label})` : ''}</span>
+    <i class="hgi-stroke hgi-tick-01 quality-dropdown__item-check" aria-hidden="true"></i>
+  `;
+  qualityDropdownList.appendChild(bestItem);
+
+  // Resolution-specific options
+  for (const fmt of formats) {
+    const item = document.createElement('button');
+    const isActive = selectedHeight !== null && String(selectedHeight) === String(fmt.height);
+    item.className = 'quality-dropdown__item' + (isActive ? ' active' : '');
+    item.dataset.height = String(fmt.height);
+    item.innerHTML = `
+      <span class="quality-dropdown__item-label">${fmt.label}</span>
+      <i class="hgi-stroke hgi-tick-01 quality-dropdown__item-check" aria-hidden="true"></i>
+    `;
+    qualityDropdownList.appendChild(item);
+  }
+}
+
+// Single permanent event listener for quality dropdown item selection
+qualityDropdownList.addEventListener('click', (e) => {
+  const item = e.target.closest('.quality-dropdown__item');
+  if (!item) return;
+
+  const heightVal = item.dataset.height;
+  if (heightVal === 'best') {
+    state.selectedResolutionHeight = null;
+    state.selectedQuality = 'best';
+    qualityBtnLabel.textContent = bestLabel(state.videoInfo?.formats);
+  } else {
+    state.selectedResolutionHeight = heightVal;
+    state.selectedQuality = heightVal;
+    const fmt = (state.videoInfo?.formats || []).find(f => String(f.height) === heightVal);
+    qualityBtnLabel.textContent = fmt ? fmt.label : qualityToLabel(heightVal);
+  }
+
+  qualityDropdownList.querySelectorAll('.quality-dropdown__item').forEach(el => el.classList.remove('active'));
+  item.classList.add('active');
+
+  window.api.setSetting('quality', state.selectedQuality);
+  closeQualityDropdown();
+});
 
 function updateQualityLabels(platform, contentType) {
   const buttons = qualitySelector.querySelectorAll('.quality-option');
-  if (buttons.length < 3) return;
+  if (buttons.length < 2) return;
 
   if (contentType === 'image' || contentType === 'carousel') {
-    buttons[0].textContent = 'Original Quality';
+    qualityBtnLabel.textContent = 'Original Quality';
     buttons[1].classList.add('collapsed');
-    buttons[2].classList.add('collapsed');
     qualitySelector.classList.add('compact');
     buttons.forEach(b => b.classList.remove('active'));
     buttons[0].classList.add('active');
     state.selectedQuality = 'best';
+    state.selectedResolutionHeight = null;
+    qualityChevron.classList.remove('visible');
+    closeQualityDropdown();
   } else {
     qualitySelector.classList.remove('compact');
     buttons[1].classList.remove('collapsed');
-    buttons[2].classList.remove('collapsed');
-    if (platform === 'youtube' || !platform) {
-      const bestFormat = state.videoInfo?.formats?.[0];
-      buttons[0].textContent = bestFormat ? `Best / ${bestFormat}` : DEFAULT_QUALITY_LABELS[0];
-      buttons[1].textContent = DEFAULT_QUALITY_LABELS[1];
-      buttons[2].textContent = DEFAULT_QUALITY_LABELS[2];
+
+    const isYouTube = platform === 'youtube' || !platform;
+    const formats = state.videoInfo?.formats || [];
+
+    if (isYouTube && formats.length > 0) {
+      qualityChevron.classList.add('visible');
+      buildQualityDropdown(formats, state.selectedResolutionHeight);
+
+      // Reconcile pre-selected quality with what's actually available
+      if (state.selectedQuality === 'best') {
+        qualityBtnLabel.textContent = bestLabel(formats);
+      } else if (state.selectedQuality !== 'audio') {
+        const selectedH = parseInt(state.selectedQuality, 10);
+        const exactMatch = formats.find(f => f.height === selectedH);
+        if (exactMatch) {
+          state.selectedResolutionHeight = String(selectedH);
+          qualityBtnLabel.textContent = exactMatch.label;
+        } else {
+          // Fall back to the next highest available resolution
+          const fallback = formats.find(f => f.height <= selectedH) || formats[formats.length - 1];
+          const originalLabel = qualityToLabel(state.selectedQuality);
+          state.selectedQuality = String(fallback.height);
+          state.selectedResolutionHeight = String(fallback.height);
+          qualityBtnLabel.textContent = fallback.label;
+          window.api.setSetting('quality', state.selectedQuality);
+          showStatus('info', `${originalLabel} not available, using ${fallback.label}`);
+          // Rebuild dropdown to reflect the new active item
+          buildQualityDropdown(formats, state.selectedResolutionHeight);
+        }
+      }
+    } else if (isYouTube) {
+      // YouTube but no formats retrieved — show presets
+      qualityChevron.classList.add('visible');
+      buildPresetDropdown(state.selectedQuality);
+      qualityBtnLabel.textContent = qualityToLabel(state.selectedQuality);
     } else {
-      buttons[0].textContent = 'Best Quality';
-      buttons[1].textContent = 'HD';
-      buttons[2].textContent = 'Audio Only';
+      // Non-YouTube platform (TikTok) — no dropdown
+      qualityChevron.classList.remove('visible');
+      qualityBtnLabel.textContent = 'Best Quality';
+      qualityDropdownList.innerHTML = '';
+    }
+
+    // Ensure video button is active (reset from any audio state)
+    if (state.selectedQuality !== 'audio') {
+      buttons.forEach(b => b.classList.remove('active'));
+      buttons[0].classList.add('active');
+      requestAnimationFrame(() => updatePillPosition(true));
     }
   }
   requestAnimationFrame(() => updatePillPosition(true));
@@ -1861,13 +2353,21 @@ function updateQualityLabels(platform, contentType) {
 
 function resetQualityLabels() {
   const buttons = qualitySelector.querySelectorAll('.quality-option');
-  if (buttons.length < 3) return;
+  if (buttons.length < 2) return;
   qualitySelector.classList.remove('compact');
   buttons[1].classList.remove('collapsed');
-  buttons[2].classList.remove('collapsed');
-  buttons[0].textContent = DEFAULT_QUALITY_LABELS[0];
-  buttons[1].textContent = DEFAULT_QUALITY_LABELS[1];
-  buttons[2].textContent = DEFAULT_QUALITY_LABELS[2];
+  closeQualityDropdown();
+
+  if (state.selectedQuality === 'audio') {
+    // Audio mode: keep audio button active, hide chevron
+    qualityChevron.classList.remove('visible');
+  } else {
+    qualityBtnLabel.textContent = qualityToLabel(state.selectedQuality);
+    qualityChevron.classList.add('visible');
+    buildPresetDropdown(state.selectedQuality);
+    buttons.forEach(b => b.classList.remove('active'));
+    buttons[0].classList.add('active');
+  }
   requestAnimationFrame(() => updatePillPosition(true));
 }
 
@@ -1875,13 +2375,56 @@ qualitySelector.addEventListener('click', (e) => {
   const option = e.target.closest('.quality-option');
   if (!option) return;
 
+  const clickedQuality = option.dataset.quality;
+
+  if (clickedQuality === 'audio') {
+    closeQualityDropdown();
+    qualitySelector.querySelectorAll('.quality-option').forEach(o => o.classList.remove('active'));
+    option.classList.add('active');
+    state.selectedQuality = 'audio';
+    state.selectedResolutionHeight = null;
+    window.api.setSetting('quality', 'audio');
+    updatePillPosition(true);
+    return;
+  }
+
+  // Clicked the video/photo button
+  const wasAlreadyActive = option.classList.contains('active');
   qualitySelector.querySelectorAll('.quality-option').forEach(o => o.classList.remove('active'));
   option.classList.add('active');
-  state.selectedQuality = option.dataset.quality;
-  window.api.setSetting('quality', state.selectedQuality);
+
+  if (state.selectedQuality !== 'audio') {
+    // Keep the existing quality selection (don't reset to 'best' when re-clicking)
+  } else {
+    // Switching from audio back to video — restore label for existing quality selection
+    const formats = state.videoInfo?.formats || [];
+    const restoredQuality = state.selectedQuality === 'audio' ? 'best' : state.selectedQuality;
+    qualityBtnLabel.textContent = restoredQuality === 'best' ? bestLabel(formats) : (formats.find(f => String(f.height) === restoredQuality)?.label ?? qualityToLabel(restoredQuality));
+    state.selectedQuality = restoredQuality;
+    state.selectedResolutionHeight = state.selectedQuality === 'best' ? null : state.selectedQuality;
+    window.api.setSetting('quality', state.selectedQuality);
+  }
 
   updatePillPosition(true);
+
+  // Toggle dropdown on click (always available — presets pre-scan, actual formats post-scan)
+  const isImageOrCarousel = state.videoInfo?.mediaType === 'image' || state.videoInfo?.mediaType === 'carousel' || !!state.carouselData;
+  if (wasAlreadyActive && !isImageOrCarousel) {
+    if (state.qualityDropdownOpen) {
+      closeQualityDropdown();
+    } else {
+      const formats = state.videoInfo?.formats || [];
+      if (formats.length > 0) {
+        buildQualityDropdown(formats, state.selectedResolutionHeight);
+      } else {
+        buildPresetDropdown(state.selectedQuality);
+      }
+      openQualityDropdown();
+    }
+  }
 });
+
+qualityBackdrop.addEventListener('click', closeQualityDropdown);
 
 /* ============================================================
    Event Bindings
@@ -1946,12 +2489,36 @@ function updateProjectUI() {
     const c = projectColors(state.activeProject);
     projectPill.style.setProperty('--proj-bright', c.bright);
     projectPill.style.setProperty('--proj-dark', c.dark);
+    projectPill.style.setProperty('--proj-on-bright', c.onBright);
+    projectPill.style.setProperty('--proj-pill-text', c.pillText);
+    projectPill.style.setProperty('--proj-light-bg', c.lightBg);
+    projectPill.style.setProperty('--proj-light-text', c.lightText);
+    videoCard.style.setProperty('--proj-dark', c.dark);
+    videoCard.style.setProperty('--proj-bright', c.bright);
+    videoCard.style.setProperty('--proj-subtle', c.subtle);
+    videoCard.style.setProperty('--proj-bright-sub', c.brightSub);
+    videoCard.style.setProperty('--proj-shimmer-lo', c.shimmerLo);
+    videoCard.style.setProperty('--proj-shimmer-hi', c.shimmerHi);
+    videoCard.style.setProperty('--proj-light-bg', c.lightBg);
+    videoCard.style.setProperty('--proj-light-text', c.lightText);
     projectBtn.style.display = 'none';
     projectPill.style.display = '';
     projectPillName.textContent = state.activeProject;
   } else {
     projectPill.style.removeProperty('--proj-bright');
     projectPill.style.removeProperty('--proj-dark');
+    projectPill.style.removeProperty('--proj-on-bright');
+    projectPill.style.removeProperty('--proj-pill-text');
+    projectPill.style.removeProperty('--proj-light-bg');
+    projectPill.style.removeProperty('--proj-light-text');
+    videoCard.style.removeProperty('--proj-dark');
+    videoCard.style.removeProperty('--proj-bright');
+    videoCard.style.removeProperty('--proj-subtle');
+    videoCard.style.removeProperty('--proj-bright-sub');
+    videoCard.style.removeProperty('--proj-shimmer-lo');
+    videoCard.style.removeProperty('--proj-shimmer-hi');
+    videoCard.style.removeProperty('--proj-light-bg');
+    videoCard.style.removeProperty('--proj-light-text');
     projectBtn.style.display = '';
     projectPill.style.display = 'none';
     projectPillName.textContent = '';
@@ -1961,6 +2528,7 @@ function updateProjectUI() {
 
 function openProjectDropdown() {
   state.projectDropdownOpen = true;
+  closeQualityDropdown();
   pathRow.classList.add('project-open');
   projectDropdown.classList.add('visible');
   projectBackdrop.classList.add('visible');
@@ -2017,6 +2585,8 @@ function renderProjectList(filter) {
     const c = projectColors(name);
     row.style.setProperty('--proj-bright', c.bright);
     row.style.setProperty('--proj-hover', c.hover);
+    row.style.setProperty('--proj-light-bg', c.lightBg);
+    row.style.setProperty('--proj-light-text', c.lightText);
     const count = counts[name] || 0;
     row.innerHTML = `
       <span class="project-dropdown__item-name">${escapeHtml(name)}</span>
@@ -2143,6 +2713,38 @@ showInFinderToggle.addEventListener('click', (e) => {
   window.api.setSetting('showInFinder', state.showInFinder);
 });
 
+if (instantDownloadToggle) {
+  instantDownloadToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    state.instantDownload = !state.instantDownload;
+    instantDownloadToggle.classList.toggle('active', state.instantDownload);
+    window.api.setSetting('instantDownload', state.instantDownload);
+    updateDownloadBtnLabel();
+
+    if (state.instantDownload) {
+      showStatus('success', t('Instant Downloads on: paste a link and hit download, no waiting'));
+    } else {
+      showStatus('info', t('Instant Downloads off: links will scan first so you can preview and confirm'));
+    }
+
+    // Re-run URL handling so the hint and button state reflect the new mode.
+    // If a URL is already in the input: instant ON → skip scan and enable button;
+    // instant OFF → clear videoInfo and re-trigger scan.
+    const currentUrl = urlInput.value.trim();
+    if (currentUrl) {
+      if (!state.instantDownload) {
+        // Turning off: clear cached video info so it re-scans
+        state.videoInfo = null;
+        videoCard.className = 'video-card';
+        hideCarousel();
+      }
+      handleUrlChange();
+    } else {
+      updateDownloadBtnState();
+    }
+  });
+}
+
 modeToggle.addEventListener('click', (e) => {
   e.stopPropagation();
   state.mode = state.mode === 'unhinged' ? 'professional' : 'unhinged';
@@ -2231,7 +2833,7 @@ function formatUploadDate(yyyymmdd) {
 }
 
 function formatFileSize(bytes) {
-  if (!bytes || bytes === 0) return '—';
+  if (!bytes || bytes === 0) return '-';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -2239,13 +2841,14 @@ function formatFileSize(bytes) {
 }
 
 function formatNumber(n) {
-  if (n == null) return '—';
+  if (n == null) return '-';
   return n.toLocaleString();
 }
 
 function qualityLabel(q, resolution) {
   if (q === 'audio') return 'Audio';
-  if (resolution) return resolution;
+  const res = resolution && typeof resolution === 'object' ? resolution.label : resolution;
+  if (res) return res;
   if (q === 'best') return 'Best';
   if (q === 'hd') return '1080p';
   return q;
@@ -2258,7 +2861,15 @@ async function openHistory() {
   closeQueue();
   closeProjectDropdown();
   historyView.classList.add('visible');
+  syncHistoryViewBtns();
+  requestAnimationFrame(() => updateHistoryFilterPill(false));
   await loadHistory();
+}
+
+function syncHistoryViewBtns() {
+  historyViewToggles.querySelectorAll('.history-view-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === state.historyViewMode);
+  });
 }
 
 function closeHistory() {
@@ -2311,14 +2922,170 @@ function getFilteredHistory() {
   return entries;
 }
 
+function buildExportData(entries) {
+  const project = state.historyProjectFilter || null;
+  const sorted = [...entries].sort((a, b) => new Date(b.downloadedAt) - new Date(a.downloadedAt));
+
+  const downloads = sorted.map(e => {
+    const isCarousel = e.mediaType === 'carousel' && e.carouselItems?.length > 0;
+    const isImage = e.mediaType === 'image' || isCarousel;
+    const clipStart = e.clipStart && e.clipStart !== '00:00:00' ? e.clipStart : null;
+    const clipEnd = e.clipEnd && e.clipEnd !== '00:00:00' ? e.clipEnd : null;
+    const clip = clipStart || clipEnd ? `${clipStart || '00:00:00'} to ${clipEnd || 'end'}` : null;
+
+    const out = {
+      title:       e.title || null,
+      source:      e.webpageUrl || null,
+      platform:    e.platform || null,
+      mediaType:   e.mediaType || null,
+      channel:     e.channel || e.uploader || null,
+      channelUrl:  e.channelUrl || null,
+      uploadDate:  e.uploadDate ? formatUploadDate(e.uploadDate) : null,
+      downloadedAt: formatFullDate(e.downloadedAt),
+      duration:    !isImage ? formatDuration(e.duration) : null,
+      clip,
+      quality:     !isImage ? (qualityLabel(e.quality, e.resolution) + ' · ' + (e.format || '').toUpperCase()) : null,
+      format:      e.format || null,
+      views:       e.viewCount ?? null,
+      likes:       e.likeCount ?? null,
+      categories:  e.categories?.length ? e.categories : null,
+      tags:        e.tags?.length ? e.tags : null,
+      license:     e.license || null,
+      description: e.description || null,
+    };
+
+    if (isCarousel && e.carouselItems?.length) {
+      out.files = e.carouselItems.map((ci, i) => ({
+        index: i + 1,
+        file: ci.filePath || null,
+        fileSize: formatFileSize(ci.fileSize),
+        mediaType: ci.mediaType,
+        format: ci.format,
+      }));
+      out.totalSize = formatFileSize(e.fileSize);
+    } else {
+      out.file = e.filePath || null;
+      out.fileSize = formatFileSize(e.fileSize);
+    }
+
+    if (e.project) out.project = e.project;
+    return out;
+  });
+
+  return {
+    export: {
+      project:        project || 'All',
+      exportedAt:     new Date().toISOString(),
+      totalDownloads: downloads.length,
+      generatedBy:    'Downroad',
+    },
+    downloads,
+  };
+}
+
+function buildExportCsv(entries) {
+  const headers = [
+    'Title', 'Source', 'Platform', 'Media Type', 'Channel', 'Channel URL',
+    'Upload Date', 'Downloaded At', 'Duration', 'Clip', 'Quality', 'Format',
+    'Views', 'Likes', 'File', 'File Size', 'Project', 'Categories', 'Tags',
+    'License', 'Description',
+  ];
+
+  function cell(val) {
+    if (val == null || val === '') return '';
+    const str = String(val);
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  }
+
+  const rows = [headers.join(',')];
+  const sorted = [...entries].sort((a, b) => new Date(b.downloadedAt) - new Date(a.downloadedAt));
+
+  for (const e of sorted) {
+    const isCarousel = e.mediaType === 'carousel' && e.carouselItems?.length > 0;
+    const isImage = e.mediaType === 'image' || isCarousel;
+    const clipStart = e.clipStart && e.clipStart !== '00:00:00' ? e.clipStart : null;
+    const clipEnd   = e.clipEnd   && e.clipEnd   !== '00:00:00' ? e.clipEnd   : null;
+    const clip = clipStart || clipEnd ? `${clipStart || '00:00:00'} to ${clipEnd || 'end'}` : '';
+    const file     = isCarousel ? `${e.carouselItems.length} files` : (e.filePath || '');
+    const fileSize = formatFileSize(e.fileSize);
+    const quality  = !isImage
+      ? `${qualityLabel(e.quality, e.resolution)} · ${(e.format || '').toUpperCase()}`
+      : '';
+
+    rows.push([
+      e.title || '',
+      e.webpageUrl || '',
+      e.platform || '',
+      e.mediaType || '',
+      e.channel || e.uploader || '',
+      e.channelUrl || '',
+      e.uploadDate ? formatUploadDate(e.uploadDate) : '',
+      formatFullDate(e.downloadedAt),
+      !isImage ? formatDuration(e.duration) : '',
+      clip,
+      quality,
+      e.format || '',
+      e.viewCount != null ? e.viewCount : '',
+      e.likeCount != null ? e.likeCount : '',
+      file,
+      fileSize,
+      e.project || '',
+      (e.categories || []).join(' | '),
+      (e.tags || []).join(' | '),
+      e.license || '',
+      e.description || '',
+    ].map(cell).join(','));
+  }
+
+  // BOM so Excel/Numbers auto-detect UTF-8
+  return '\uFEFF' + rows.join('\r\n');
+}
+
+async function exportHistory() {
+  const entries = getFilteredHistory();
+  if (!entries.length) return;
+
+  const content = buildExportCsv(entries);
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const projectSlug = state.historyProjectFilter
+    ? state.historyProjectFilter.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '')
+    : 'History';
+  const defaultPath = `Downroad-${projectSlug}-${dateStr}.csv`;
+
+  historyExportBtn.disabled = true;
+  const result = await window.api.saveFile({ defaultPath, content });
+  historyExportBtn.disabled = false;
+
+  if (result?.saved) {
+    const original = historyExportBtn.innerHTML;
+    historyExportBtn.innerHTML = `${icon('tick-01', 'ui-icon ui-icon--action')}Exported!`;
+    setTimeout(() => { historyExportBtn.innerHTML = original; }, 1800);
+  }
+}
+
+function updateExportBtnLabel() {
+  if (!historyExportBtn) return;
+  const label = state.historyProjectFilter
+    ? `Export "${state.historyProjectFilter}"`
+    : 'Export All';
+  historyExportBtn.innerHTML = `${icon('download-04', 'ui-icon ui-icon--action')}${label}`;
+}
+
 function renderHistoryList() {
   const entries = getFilteredHistory();
   historyList.innerHTML = '';
+  collapseActiveCard = null;
+  if (_closeDetailModal) _closeDetailModal();
 
   const count = entries.length;
   historyCount.textContent = `${count} download${count !== 1 ? 's' : ''}`;
 
   updateHistoryProjectFilter();
+  updateExportBtnLabel();
 
   if (count === 0) {
     historyEmpty.classList.add('visible');
@@ -2329,8 +3096,17 @@ function renderHistoryList() {
   historyEmpty.classList.remove('visible');
   historyList.style.display = '';
 
+  historyList.classList.remove('history-list--list', 'history-list--grid', 'history-list--compact');
+  historyList.classList.add(`history-list--${state.historyViewMode}`);
+
   for (const entry of entries) {
-    historyList.appendChild(createHistoryEntryEl(entry));
+    if (state.historyViewMode === 'grid') {
+      historyList.appendChild(createHistoryGridCardEl(entry));
+    } else if (state.historyViewMode === 'compact') {
+      historyList.appendChild(createHistoryCompactRowEl(entry));
+    } else {
+      historyList.appendChild(createHistoryEntryEl(entry));
+    }
   }
 }
 
@@ -2356,9 +3132,13 @@ function updateHistoryProjectFilter() {
     const bc = projectColors(state.historyProjectFilter);
     historyProjectBtn.style.setProperty('--proj-bright', bc.bright);
     historyProjectBtn.style.setProperty('--proj-dark', bc.dark);
+    historyProjectBtn.style.setProperty('--proj-light-bg', bc.lightBg);
+    historyProjectBtn.style.setProperty('--proj-light-text', bc.lightText);
   } else {
     historyProjectBtn.style.removeProperty('--proj-bright');
     historyProjectBtn.style.removeProperty('--proj-dark');
+    historyProjectBtn.style.removeProperty('--proj-light-bg');
+    historyProjectBtn.style.removeProperty('--proj-light-text');
   }
 
   historyProjectMenu.innerHTML = '';
@@ -2382,6 +3162,8 @@ function updateHistoryProjectFilter() {
     item.style.setProperty('--proj-bright', c.bright);
     item.style.setProperty('--proj-dark', c.dark);
     item.style.setProperty('--proj-hover', c.hover);
+    item.style.setProperty('--proj-light-bg', c.lightBg);
+    item.style.setProperty('--proj-light-text', c.lightText);
     item.textContent = name;
     item.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2404,6 +3186,9 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// Tracks the collapse function of the currently open card so only one is open at a time
+let collapseActiveCard = null;
+
 function createHistoryEntryEl(entry) {
   const el = document.createElement('div');
   el.className = 'history-entry';
@@ -2413,6 +3198,10 @@ function createHistoryEntryEl(entry) {
     el.style.setProperty('--proj-dark', c.dark);
     el.style.setProperty('--proj-bright', c.bright);
     el.style.setProperty('--proj-subtle', c.subtle);
+    el.style.setProperty('--proj-bright-sub', c.brightSub);
+    el.style.setProperty('--proj-pill-text', c.pillText);
+    el.style.setProperty('--proj-light-bg', c.lightBg);
+    el.style.setProperty('--proj-light-text', c.lightText);
   }
 
   const isCarousel = entry.mediaType === 'carousel' && entry.carouselItems?.length > 0;
@@ -2482,13 +3271,13 @@ function createHistoryEntryEl(entry) {
       const child = entry.carouselItems[ci];
       detailRows.push({
         label: `File ${ci + 1}`,
-        value: child.filePath || '—',
+        value: child.filePath || '-',
         clickToReveal: !!child.filePath,
       });
     }
     detailRows.push({ label: 'Total Size', value: formatFileSize(entry.fileSize) });
   } else {
-    detailRows.push({ label: 'File', value: entry.filePath || '—', clickToReveal: !!entry.filePath });
+    detailRows.push({ label: 'File', value: entry.filePath || '-', clickToReveal: !!entry.filePath });
     detailRows.push({ label: 'Size', value: formatFileSize(entry.fileSize) });
   }
   if (entry.project) {
@@ -2497,11 +3286,15 @@ function createHistoryEntryEl(entry) {
   detailRows.push({ label: 'Downloaded', value: formatFullDate(entry.downloadedAt) });
 
   const dlHtml = detailRows.map(r => {
+    const hasCopy = r.value && r.value !== '-';
+    const copyBtn = hasCopy
+      ? `<button class="history-copy-row-btn" data-copy-value="${escapeHtml(r.value)}" title="Copy">${icon('copy-01', 'ui-icon')}</button>`
+      : '';
     if (r.clickToReveal) {
       const display = truncatePath(r.value);
-      return `<dt>${r.label}</dt><dd class="file-link" data-filepath="${escapeHtml(r.value)}" title="${escapeHtml(r.value)}">${escapeHtml(display)}</dd>`;
+      return `<dt>${r.label}</dt><dd class="file-link" data-filepath="${escapeHtml(r.value)}" title="${escapeHtml(r.value)}"><span class="history-dd-text">${escapeHtml(display)}</span>${copyBtn}</dd>`;
     }
-    return `<dt>${r.label}</dt><dd${r.copyable ? ' class="copyable"' : ''}>${escapeHtml(r.value)}</dd>`;
+    return `<dt>${r.label}</dt><dd${r.copyable ? ' class="copyable"' : ''}><span class="history-dd-text">${escapeHtml(r.value)}</span>${copyBtn}</dd>`;
   }).join('');
 
   const qualityBadge = isCarousel
@@ -2523,34 +3316,113 @@ function createHistoryEntryEl(entry) {
       </span>
     </div>
     <div class="history-entry__detail">
-      <div class="history-entry__detail-divider"></div>
-      <dl class="history-detail-grid">${dlHtml}</dl>
-      <div class="history-entry__actions">
-        ${entry.webpageUrl ? '<button class="history-action-btn history-action-btn--redownload" data-action="redownload">Download Again</button>' : ''}
-        <button class="history-action-btn history-action-btn--copyinfo" data-action="copyinfo">Copy Info</button>
-        <button class="history-action-btn history-action-btn--copy" data-action="copy">Copy URL</button>
-        <button class="history-action-btn history-action-btn--open" data-action="open">Open</button>
-        <button class="history-action-btn history-action-btn--delete" data-action="delete">Remove</button>
+      <div class="history-entry__detail-inner">
+        <div class="history-entry__detail-divider"></div>
+        <dl class="history-detail-grid">${dlHtml}</dl>
+        <div class="history-entry__actions">
+          ${entry.webpageUrl ? '<button class="history-action-btn history-action-btn--redownload" data-action="redownload">Download Again</button>' : ''}
+          <button class="history-action-btn history-action-btn--copyinfo" data-action="copyinfo">Copy Info</button>
+          <button class="history-action-btn history-action-btn--copy" data-action="copy">Copy URL</button>
+          <button class="history-action-btn history-action-btn--open" data-action="open">${icon('internet', 'ui-icon ui-icon--action')}Open Original</button>
+          <button class="history-action-btn history-action-btn--delete" data-action="delete">Remove</button>
+        </div>
       </div>
     </div>
   `;
 
   const header = el.querySelector('.history-entry__header');
+  header.insertBefore(createThumbEl(entry, 'history-entry__thumb'), header.firstChild);
+  const detail = el.querySelector('.history-entry__detail');
+  let expandAnim = null;
+
+  // Smooth ease-out quint — fast start, gentle deceleration, no overshoot
+  const EASE_OPEN  = 'cubic-bezier(0.22, 1, 0.36, 1)';
+  // Ease-out quart — fast drop, gently settles to closed
+  const EASE_CLOSE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+
+  function collapse() {
+    if (!el.classList.contains('expanded')) return;
+    if (expandAnim) { expandAnim.cancel(); expandAnim = null; }
+    detail.classList.add('is-closing');
+    el.classList.remove('expanded');
+    if (collapseActiveCard === collapse) collapseActiveCard = null;
+    const fromHeight = detail.offsetHeight;
+    const anim = detail.animate(
+      [{ height: fromHeight + 'px' }, { height: '0px' }],
+      { duration: 300, easing: EASE_CLOSE, fill: 'forwards' }
+    );
+    expandAnim = anim;
+    anim.finished.then(() => {
+      if (expandAnim !== anim) return;
+      expandAnim.cancel();
+      detail.style.height = '0px';
+      detail.classList.remove('is-closing');
+      expandAnim = null;
+    }).catch(() => {});
+  }
+
   header.addEventListener('click', () => {
-    el.classList.toggle('expanded');
+    if (expandAnim) { expandAnim.cancel(); expandAnim = null; }
+
+    if (el.classList.contains('expanded')) {
+      // ── Collapse self ─────────────────────────────────────────────────
+      collapse();
+    } else {
+      // ── Close whatever is currently open, then expand self ────────────
+      if (collapseActiveCard) collapseActiveCard();
+
+      detail.style.height = 'auto';
+      const targetHeight = detail.offsetHeight;
+      detail.style.height = '0px';
+      detail.offsetHeight; // force reflow
+
+      el.classList.add('expanded');
+      collapseActiveCard = collapse;
+
+      const anim = detail.animate(
+        [{ height: '0px' }, { height: targetHeight + 'px' }],
+        { duration: 420, easing: EASE_OPEN, fill: 'forwards' }
+      );
+      expandAnim = anim;
+      anim.finished.then(() => {
+        if (expandAnim !== anim) return;
+        expandAnim.cancel();
+        detail.style.height = 'auto';
+        expandAnim = null;
+      }).catch(() => {});
+    }
   });
 
   el.querySelectorAll('.file-link').forEach(fileLink => {
     fileLink.addEventListener('click', async (e) => {
+      if (e.target.closest('.history-copy-row-btn')) return;
       e.stopPropagation();
       const fp = fileLink.dataset.filepath;
       if (!fp) return;
       const result = await window.api.revealInFinder(fp);
       if (!result.found) {
         fileLink.classList.add('missing');
-        fileLink.title = t('File was moved or deleted — opened download folder');
+        fileLink.title = t('File was moved or deleted. Opened the download folder.');
       }
     });
+  });
+
+  el.querySelector('.history-detail-grid').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.history-copy-row-btn');
+    if (!btn || btn.classList.contains('history-copy-row-btn--empty')) return;
+    e.stopPropagation();
+    const value = btn.dataset.copyValue;
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      const originalHTML = btn.innerHTML;
+      btn.innerHTML = icon('tick-01', 'ui-icon');
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.innerHTML = originalHTML;
+        btn.classList.remove('copied');
+      }, 1500);
+    } catch { /* clipboard access denied */ }
   });
 
   el.querySelector('[data-action="copyinfo"]').addEventListener('click', async (e) => {
@@ -2636,6 +3508,171 @@ function createHistoryEntryEl(entry) {
   return el;
 }
 
+// ---- Thumbnail helper ----
+function resolveThumbUrl(entry) {
+  if (entry.thumbnail) return entry.thumbnail;
+  // Reconstruct from videoId for existing YouTube entries saved before the thumbnail field was added
+  if (entry.videoId && (entry.platform === 'youtube' || !entry.platform)) {
+    return `https://i.ytimg.com/vi/${entry.videoId}/hqdefault.jpg`;
+  }
+  return '';
+}
+
+function createThumbEl(entry, cssClass) {
+  const wrapper = document.createElement('div');
+  wrapper.className = cssClass;
+  const isAudio = entry.quality === 'audio' || entry.mediaType === 'audio';
+  const fallbackIconName = isAudio ? 'music-note-01' : 'image-not-found-01';
+  const thumbUrl = resolveThumbUrl(entry);
+  if (thumbUrl) {
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src = thumbUrl;
+    img.alt = '';
+    img.addEventListener('error', () => {
+      wrapper.innerHTML = icon(fallbackIconName, 'ui-icon history-thumb__icon');
+      wrapper.classList.add('history-thumb--placeholder');
+    });
+    wrapper.appendChild(img);
+  } else {
+    wrapper.innerHTML = icon(fallbackIconName, 'ui-icon history-thumb__icon');
+    wrapper.classList.add('history-thumb--placeholder');
+  }
+  return wrapper;
+}
+
+// ---- Detail modal (shared by grid and compact clicks) ----
+let _closeDetailModal = null;
+
+function openHistoryDetailModal(entry) {
+  if (_closeDetailModal) _closeDetailModal();
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'history-detail-modal-backdrop';
+
+  const panel = document.createElement('div');
+  panel.className = 'history-detail-modal-panel';
+
+  // Close button lives on the backdrop (not inside the scrollable panel)
+  // so it stays visible regardless of scroll position
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'history-detail-modal-close';
+  closeBtn.innerHTML = icon('cancel-01', 'ui-icon');
+  closeBtn.setAttribute('aria-label', 'Close');
+
+  const entryEl = createHistoryEntryEl(entry);
+  const detail = entryEl.querySelector('.history-entry__detail');
+  const detailInner = entryEl.querySelector('.history-entry__detail-inner');
+  entryEl.classList.add('expanded');
+  detail.style.height = 'auto';
+  detailInner.style.opacity = '1';
+
+  panel.appendChild(entryEl);
+  backdrop.appendChild(panel);
+  backdrop.appendChild(closeBtn);
+  historyView.appendChild(backdrop);
+
+  requestAnimationFrame(() => backdrop.classList.add('visible'));
+
+  function closeModal() {
+    backdrop.classList.remove('visible');
+    setTimeout(() => { if (backdrop.parentNode) backdrop.remove(); }, 250);
+    _closeDetailModal = null;
+  }
+
+  _closeDetailModal = closeModal;
+
+  backdrop.addEventListener('click', (e) => {
+    if (!panel.contains(e.target) && !closeBtn.contains(e.target)) closeModal();
+  });
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeModal();
+  });
+
+  const deleteBtn = entryEl.querySelector('[data-action="delete"]');
+  if (deleteBtn) deleteBtn.addEventListener('click', () => setTimeout(closeModal, 50), { once: true });
+
+  const redownloadBtn = entryEl.querySelector('[data-action="redownload"]');
+  if (redownloadBtn) redownloadBtn.addEventListener('click', closeModal, { once: true });
+}
+
+// ---- Grid card ----
+function createHistoryGridCardEl(entry) {
+  const el = document.createElement('div');
+  el.className = 'history-grid-card';
+  el.dataset.id = entry.id;
+  if (entry.project) {
+    const c = projectColors(entry.project);
+    el.style.setProperty('--proj-dark', c.dark);
+    el.style.setProperty('--proj-bright', c.bright);
+    el.style.setProperty('--proj-subtle', c.subtle);
+    el.style.setProperty('--proj-bright-sub', c.brightSub);
+    el.style.setProperty('--proj-pill-text', c.pillText);
+    el.style.setProperty('--proj-light-bg', c.lightBg);
+    el.style.setProperty('--proj-light-text', c.lightText);
+  }
+
+  const isCarousel = entry.mediaType === 'carousel' && entry.carouselItems?.length > 0;
+  const isImage = entry.mediaType === 'image' || isCarousel;
+  const uploaderText = entry.uploader || entry.channel || '';
+  const durationText = !isImage ? formatDuration(entry.duration) : '';
+  const metaText = [uploaderText, durationText].filter(Boolean).join(' · ');
+  const qualityText = isCarousel
+    ? `${entry.carouselItems.length} items`
+    : qualityLabel(entry.quality, entry.resolution);
+
+  const thumb = createThumbEl(entry, 'history-grid-card__thumb');
+
+  el.innerHTML = `
+    <div class="history-grid-card__body">
+      <div class="history-grid-card__title">${escapeHtml(entry.title)}</div>
+      <div class="history-grid-card__meta">${escapeHtml(metaText)}</div>
+      <span class="history-grid-card__quality">${escapeHtml(qualityText)}</span>
+    </div>
+  `;
+  el.insertBefore(thumb, el.firstChild);
+  el.addEventListener('click', () => openHistoryDetailModal(entry));
+  return el;
+}
+
+// ---- Compact row ----
+function createHistoryCompactRowEl(entry) {
+  const el = document.createElement('div');
+  el.className = 'history-compact-row';
+  el.dataset.id = entry.id;
+  if (entry.project) {
+    const c = projectColors(entry.project);
+    el.style.setProperty('--proj-dark', c.dark);
+    el.style.setProperty('--proj-bright', c.bright);
+    el.style.setProperty('--proj-subtle', c.subtle);
+    el.style.setProperty('--proj-bright-sub', c.brightSub);
+    el.style.setProperty('--proj-pill-text', c.pillText);
+    el.style.setProperty('--proj-light-bg', c.lightBg);
+    el.style.setProperty('--proj-light-text', c.lightText);
+  }
+
+  const isCarousel = entry.mediaType === 'carousel' && entry.carouselItems?.length > 0;
+  const uploaderText = entry.uploader || entry.channel || '';
+  const qualityText = isCarousel
+    ? `${entry.carouselItems.length} items`
+    : qualityLabel(entry.quality, entry.resolution);
+
+  const thumb = createThumbEl(entry, 'history-compact-row__thumb');
+
+  el.innerHTML = `
+    <div class="history-compact-row__info">
+      <div class="history-compact-row__title">${escapeHtml(entry.title)}</div>
+      ${uploaderText ? `<div class="history-compact-row__channel">${escapeHtml(uploaderText)}</div>` : ''}
+    </div>
+    <span class="history-compact-row__quality">${escapeHtml(qualityText)}</span>
+    <span class="history-compact-row__date">${escapeHtml(formatRelativeDate(entry.downloadedAt))}</span>
+  `;
+  el.insertBefore(thumb, el.firstChild);
+  el.addEventListener('click', () => openHistoryDetailModal(entry));
+  return el;
+}
+
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str || '';
@@ -2660,9 +3697,17 @@ historyBack.addEventListener('click', () => {
   closeHistory();
 });
 
+historyExportBtn.addEventListener('click', () => {
+  exportHistory();
+});
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state.projectDropdownOpen) {
     closeProjectDropdown();
+    return;
+  }
+  if (e.key === 'Escape' && _closeDetailModal) {
+    _closeDetailModal();
     return;
   }
   if (e.key === 'Escape' && state.historyOpen) {
@@ -2716,12 +3761,24 @@ historySortBtn.addEventListener('click', () => {
   renderHistoryList();
 });
 
+historyViewToggles.addEventListener('click', (e) => {
+  const btn = e.target.closest('.history-view-btn');
+  if (!btn) return;
+  const view = btn.dataset.view;
+  if (view === state.historyViewMode) return;
+  state.historyViewMode = view;
+  localStorage.setItem('historyViewMode', view);
+  syncHistoryViewBtns();
+  renderHistoryList();
+});
+
 document.querySelector('.history-filters').addEventListener('click', (e) => {
-  const btn = e.target.closest('.history-filter');
+  const btn = e.target.closest('.history-filter[data-filter]');
   if (!btn) return;
   document.querySelectorAll('.history-filter').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   state.historyFilter = btn.dataset.filter;
+  updateHistoryFilterPill();
   renderHistoryList();
 });
 
@@ -2736,10 +3793,16 @@ async function init() {
   ]);
 
   state.downloadPath = settings.downloadPath;
-  state.selectedQuality = settings.quality || 'best';
+  const savedQuality = settings.quality || 'best';
+  // Map legacy 'hd' to 'best' for backward compatibility
+  state.selectedQuality = savedQuality === 'hd' ? 'best' : savedQuality;
+  state.selectedResolutionHeight = (state.selectedQuality !== 'best' && state.selectedQuality !== 'audio')
+    ? state.selectedQuality : null;
   state.autoPaste = settings.autoPaste !== false;
   state.showInFinder = settings.showInFinder === true;
+  state.instantDownload = settings.instantDownload === true;
   state.mode = settings.mode || 'unhinged';
+  state.theme = settings.theme || 'auto';
   state.activeProject = settings.activeProject || null;
   state.projects = settings.projects || [];
   state.projectHues = settings.projectHues || {};
@@ -2749,13 +3812,26 @@ async function init() {
 
   autoPasteToggle.classList.toggle('active', state.autoPaste);
   showInFinderToggle.classList.toggle('active', state.showInFinder);
+  if (instantDownloadToggle) instantDownloadToggle.classList.toggle('active', state.instantDownload);
   modeToggle.classList.toggle('active', state.mode === 'professional');
+  applyTheme(state.theme);
   applyMode();
+  updateDownloadBtnLabel();
 
+  // Set correct button active state on startup + show quality label + presets
   const qualityBtns = qualitySelector.querySelectorAll('.quality-option');
   qualityBtns.forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.quality === state.selectedQuality);
+    const isActive = state.selectedQuality === 'audio'
+      ? btn.dataset.quality === 'audio'
+      : btn.dataset.quality === 'best';
+    btn.classList.toggle('active', isActive);
   });
+
+  if (state.selectedQuality !== 'audio') {
+    qualityBtnLabel.textContent = qualityToLabel(state.selectedQuality);
+    qualityChevron.classList.add('visible');
+    buildPresetDropdown(state.selectedQuality);
+  }
 
   updateDownloadBtnState();
 

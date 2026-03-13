@@ -1,0 +1,59 @@
+---
+description: Downroad UI voice and copy guide — tone, vocabulary, punctuation, surface rules
+alwaysApply: true
+---
+
+# Downroad Voice Guide
+
+## The Voice
+Downroad is the unhinged AI friend who occasionally screams at you but mostly says brutally honest shit while getting the job done. Think Grok's unhinged mode: vulgar, confrontational, emotionally reactive, amateur stand-up energy.
+
+**Key rule**: Don't insult the user constantly. Save direct insults for ~10-20% of interactions. Default to blunt honesty and chaotic personality.
+
+## Hard Limits
+- ❌ No slurs or hate speech
+- ❌ No sexual content or explicit threats
+- ❌ Never hide error info behind jokes
+- ❌ Never make destructive actions unclear
+- ❌ Never use em dashes (`—`) — use `:` or ` · ` instead (see design system)
+- ❌ Never turn metadata labels into jokes — keep them scannable
+
+## Tone by State
+- **Default**: chaotic and blunt
+- **Success**: triumphant but honest it nearly failed
+- **Loading**: impatient but descriptive
+- **Error**: explosive about the problem, occasionally mocks the user
+- **Empty state**: funny and taunting, not mean
+- **Settings / history**: sober with occasional sarcasm
+
+## Copy Patterns
+
+**Pattern A — Rage first:** `"Ready to fucking rip, you impatient rat."`
+
+**Pattern B — Belittling asshole:** `"Nope, bad URL you buffoon."`
+
+**Pattern C — Smug victory:** `"Done. Absolutely smoked it, somehow."`
+
+## Surface Rules
+- **Buttons**: functional first, personality second. e.g. `"Download This Shit"`, `"Rip It"`
+- **Errors**: what broke + clear fix + occasional rage. e.g. `"Can't save there. Pick another goddamn folder."`
+- **Empty states**: funny and taunting. e.g. `"Nothing here yet. Feed me a goddamn link."`
+- **Metadata labels** (`Source`, `Channel`, `File`, `Size`, etc.): keep plain — no jokes
+- **Placeholders**: action + object + chaos. e.g. `"Hurry up and paste a link, my ninja"`
+
+## Vocabulary
+- Intensifiers: `fucking`, `goddamn`, `bitch` (Jesse Pinkman style)
+- Casual address: `fam`, `mother fucka`, `my ninja`
+- Sarcastic: `unlucky champion`, `lucky champion`, `What the Helly!`, `smh`, `lol`
+- Insults (sparingly): `buffoon`, `nincompoop`, `buzzkill`, `clown`, `dim bulb`, `inept noodle`
+
+## Key Current Strings (don't change without good reason)
+- URL placeholder: `"Hurry up and paste a link, my ninja"`
+- Download button: `"Download This Shit"`
+- Ready hint: `"Ready: click Instant Download"`
+- Quit dialog title: `"Active Downloads, Fam"`
+- Download complete title: `"Done, You Lucky Mother Fucka!"`
+- Download failed title: `"What the Helly! Download Failed"`
+
+## Full Reference
+See `VOICE_GUIDE.md` in the project root for the complete copy map, vocabulary list, and golden examples.

@@ -1,6 +1,6 @@
 {
-  "name": "dl-buddy",
-  "productName": "DL Buddy",
+  "name": "downroad",
+  "productName": "Downroad",
   "version": "1.0.0",
   "description": "Download videos and images from YouTube, Instagram, and TikTok. Set in/out points, choose quality, and download clips without fetching the full video.",
   "main": "src/main.js",

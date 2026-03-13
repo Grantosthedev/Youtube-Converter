@@ -1,9 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Notification, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Notification, nativeImage, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const Store = require('electron-store');
-const { fetchVideoInfo, startDownload, fetchCarouselVideos } = require('./ytdlp');
+const { fetchVideoInfo, startDownload, fetchCarouselVideos, cleanStaleYtdlpTemp } = require('./ytdlp');
 const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, ensureYtdlpFresh } = require('./updater');
 const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri } = require('./media-fetcher');
@@ -35,6 +35,7 @@ const store = new Store({
     quality: 'best',
     autoPaste: true,
     showInFinder: false,
+    instantDownload: false,
     mode: 'unhinged',
     windowBounds: { width: 880, height: 640 },
     downloadHistory: [],
@@ -110,6 +111,10 @@ if (!gotLock) {
 
 function createWindow() {
   const { width, height } = store.get('windowBounds');
+
+  // Apply saved theme before window creation so vibrancy uses the right appearance
+  const savedTheme = store.get('theme', 'auto');
+  nativeTheme.themeSource = savedTheme === 'dark' ? 'dark' : savedTheme === 'light' ? 'light' : 'system';
 
   mainWindow = new BrowserWindow({
     width,
@@ -205,7 +210,8 @@ ipcMain.handle('fetch-video-info', async (_event, url) => {
   return info;
 });
 
-const VALID_QUALITIES = new Set(['best', 'hd', 'audio']);
+const VALID_QUALITIES = new Set(['best', 'audio']);
+const VALID_QUALITY_HEIGHT = /^\d{3,4}$/;
 const TIME_FORMAT = /^\d{2}:\d{2}:\d{2}$/;
 
 ipcMain.handle('start-download', async (event, options) => {
@@ -218,7 +224,7 @@ ipcMain.handle('start-download', async (event, options) => {
   if (!isValidURL(options.url)) {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
-  if (options.quality && !VALID_QUALITIES.has(options.quality)) {
+  if (options.quality && !VALID_QUALITIES.has(options.quality) && !VALID_QUALITY_HEIGHT.test(options.quality)) {
     throw new Error('Invalid quality setting, you thick as a brick.');
   }
   if (options.startTime && !TIME_FORMAT.test(options.startTime)) {
@@ -261,7 +267,7 @@ ipcMain.handle('start-download', async (event, options) => {
     startTime: options.startTime,
     endTime: options.endTime,
     outputPath: downloadPath,
-    title: options.title || 'download',
+    title: options.title || null,
     platform,
   };
 
@@ -297,6 +303,7 @@ ipcMain.handle('start-download', async (event, options) => {
           id: crypto.randomUUID(),
           videoId: cachedInfo.id || '',
           title: cachedInfo.title || downloadOptions.title,
+          thumbnail: cachedInfo.thumbnail || '',
           uploader: cachedInfo.uploader || '',
           channel: cachedInfo.channel || '',
           channelUrl: cachedInfo.channelUrl || '',
@@ -310,7 +317,7 @@ ipcMain.handle('start-download', async (event, options) => {
           tags: cachedInfo.tags || [],
           license: cachedInfo.license || '',
           quality: downloadOptions.quality,
-          resolution: cachedInfo.formats?.[0] || null,
+          resolution: cachedInfo.formats?.[0]?.label ?? cachedInfo.formats?.[0] ?? null,
           clipStart: downloadOptions.startTime || null,
           clipEnd: downloadOptions.endTime || null,
           filePath: filePath || '',
@@ -460,6 +467,7 @@ ipcMain.handle('download-image', async (_event, options) => {
         carouselGroupId: groupId,
         videoId: '',
         title: options.title || options.filename || 'Instagram carousel',
+        thumbnail: options.thumbnail || '',
         uploader: options.postOwner || '',
         channel: options.postOwner || '',
         channelUrl: '',
@@ -509,6 +517,7 @@ ipcMain.handle('download-image', async (_event, options) => {
       id: crypto.randomUUID(),
       videoId: '',
       title: options.title || options.filename || 'Instagram post',
+      thumbnail: options.thumbnail || '',
       uploader: options.postOwner || '',
       channel: options.postOwner || '',
       channelUrl: '',
@@ -597,18 +606,23 @@ ipcMain.handle('get-settings', async () => {
     quality: store.get('quality'),
     autoPaste: store.get('autoPaste'),
     showInFinder: store.get('showInFinder'),
+    instantDownload: store.get('instantDownload'),
     mode: store.get('mode'),
+    theme: store.get('theme', 'auto'),
     activeProject: store.get('activeProject'),
     projects: store.get('projects'),
     projectHues: ensureProjectHues(),
   };
 });
 
-const ALLOWED_SETTINGS = new Set(['quality', 'autoPaste', 'downloadPath', 'showInFinder', 'mode']);
+const ALLOWED_SETTINGS = new Set(['quality', 'autoPaste', 'downloadPath', 'showInFinder', 'instantDownload', 'mode', 'theme']);
 
 ipcMain.handle('set-setting', async (_event, key, value) => {
   if (!ALLOWED_SETTINGS.has(key)) return;
   store.set(key, value);
+  if (key === 'theme') {
+    nativeTheme.themeSource = value === 'dark' ? 'dark' : value === 'light' ? 'light' : 'system';
+  }
 });
 
 ipcMain.handle('update-ytdlp', async () => {
@@ -725,10 +739,21 @@ ipcMain.handle('open-external', async (_event, url) => {
   }
 });
 
+ipcMain.handle('save-file', async (_event, { defaultPath, content }) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    defaultPath,
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (canceled || !filePath) return { saved: false };
+  await fs.promises.writeFile(filePath, content, 'utf8');
+  return { saved: true, filePath };
+});
+
 // --- App lifecycle ---
 
 app.on('ready', () => {
-  app.setName('DL Buddy');
+  app.setName('Downroad');
+  cleanStaleYtdlpTemp();
   createWindow();
 
   const sendActivity = (data) => {

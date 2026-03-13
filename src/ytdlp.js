@@ -1,14 +1,38 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const { getYtdlpPath, getFfmpegPath, sanitizeFilename } = require('./utils');
 const path = require('path');
 
+// Remove stale PyInstaller temp dirs (_MEI*) that accumulate when yt-dlp is
+// killed mid-run or the disk fills up. Each one is ~45 MB so even a handful
+// can cause "Could not create temporary directory!" errors on low-disk systems.
+function cleanStaleYtdlpTemp() {
+  try {
+    const tmpDir = os.tmpdir();
+    const entries = fs.readdirSync(tmpDir);
+    for (const entry of entries) {
+      if (!entry.startsWith('_MEI')) continue;
+      const fullPath = path.join(tmpDir, entry);
+      try {
+        // Only remove dirs that haven't been touched in the last 10 minutes
+        const stat = fs.statSync(fullPath);
+        const ageMs = Date.now() - stat.mtimeMs;
+        if (ageMs > 10 * 60 * 1000) {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        }
+      } catch { /* skip if we can't stat or remove */ }
+    }
+  } catch { /* non-fatal */ }
+}
+
 const ERROR_MAP = [
+  { pattern: /Could not create temp|Could not create temporary/i, message: 'Your disk is almost full. Free up some space and try again.' },
   { pattern: /private video/i, message: 'This video is private. You need access to download it.' },
   { pattern: /age.?restrict|age.?gate|sign in to confirm your age/i, message: 'This video is age-restricted. It cannot be downloaded without authentication.' },
   { pattern: /not available in your country/i, message: 'This video is not available in your region.' },
   { pattern: /login.*page|locked behind/i, message: 'This content requires login. Try updating yt-dlp, or the content may be private.' },
-  { pattern: /Unsupported URL/i, message: 'This URL type isn\'t supported yet. DL Buddy handles videos and audio -- image-only posts aren\'t supported via this method.' },
+  { pattern: /Unsupported URL/i, message: 'This URL type isn\'t supported yet. Downroad handles videos and audio -- image-only posts aren\'t supported via this method.' },
   { pattern: /unable to extract/i, message: 'Couldn\'t extract content. The post may be private, deleted, or require login. Try updating yt-dlp in Settings.' },
   { pattern: /HTTP Error 429/i, message: 'Rate-limiting detected. Wait a minute and try again.' },
   { pattern: /HTTP Error 403|Forbidden/i, message: 'Access denied. The platform is rate-limiting requests. Wait a moment and try again.' },
@@ -55,6 +79,7 @@ function fetchVideoInfo(url, platform) {
       url,
     ];
 
+    cleanStaleYtdlpTemp();
     const timeout = platform === 'instagram' ? 60000 : platform === 'tiktok' ? 45000 : 30000;
     const proc = spawn(ytdlp, args);
     let stdout = '';
@@ -127,13 +152,13 @@ function fetchVideoInfo(url, platform) {
 }
 
 function extractAvailableQualities(formats) {
-  const heights = new Set();
+  const heightSet = new Set();
   for (const f of formats) {
-    if (f.height && f.vcodec !== 'none') heights.add(f.height);
+    if (f.height && f.vcodec !== 'none') heightSet.add(f.height);
   }
-  const sorted = [...heights].sort((a, b) => b - a);
+  const sorted = [...heightSet].sort((a, b) => b - a);
   const seen = new Set();
-  const labels = [];
+  const result = [];
   for (const h of sorted) {
     let label;
     if (h >= 2160) label = '4K';
@@ -144,14 +169,16 @@ function extractAvailableQualities(formats) {
     else label = `${h}p`;
     if (!seen.has(label)) {
       seen.add(label);
-      labels.push(label);
+      result.push({ label, height: h });
     }
   }
-  return labels;
+  return result;
 }
 
 function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title, ffmpegDir, platform }) {
-  const safeName = sanitizeFilename(title);
+  // When no title is provided (instant download), let yt-dlp resolve the filename from metadata
+  const safeName = title ? sanitizeFilename(title) : '';
+  const outputTemplate = safeName ? `${safeName}.%(ext)s` : '%(title)s.%(ext)s';
   const isYouTube = !platform || platform === 'youtube';
   const args = [
     '--no-warnings',
@@ -159,47 +186,48 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
     '--newline',
     '--ffmpeg-location', ffmpegDir,
     '--concurrent-fragments', '4',
-    '--retries', '3',
-    '--fragment-retries', '3',
+    '--retries', '5',
+    '--fragment-retries', '5',
     '--buffer-size', '64K',
   ];
 
   if (quality === 'audio') {
     args.push('-f', 'bestaudio[ext=m4a]/bestaudio');
     args.push('-x', '--audio-format', 'm4a', '--audio-quality', '0');
-    args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
+    args.push('-o', path.join(outputPath, outputTemplate));
   } else if (isYouTube) {
-    if (quality === 'hd') {
+    const isNumericHeight = /^\d+$/.test(quality);
+    if (isNumericHeight) {
+      const h = quality;
       args.push(
         '-f',
-        'bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio',
+        `bestvideo[height=${h}]+bestaudio[acodec^=mp4a]/bestvideo[height=${h}]+bestaudio/bestvideo[height<=${h}]+bestaudio[acodec^=mp4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`,
         '--merge-output-format', 'mp4',
       );
     } else {
       args.push(
         '-f',
-        'bestvideo[height>=2160]+bestaudio/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio/best',
+        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best',
         '--merge-output-format', 'mp4',
       );
     }
-    args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
+    // Sort by resolution first, then prefer H.264 video and AAC audio for reliability
+    args.push('-S', 'res,vcodec:avc,acodec:mp4a');
+    args.push('-o', path.join(outputPath, outputTemplate));
   } else if (platform === 'instagram') {
-    if (quality === 'hd') {
-      args.push(
-        '-f',
-        'bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080][vcodec^=avc1]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-      );
-    } else {
-      args.push(
-        '-f',
-        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio/best',
-      );
-    }
+    args.push(
+      '-f',
+      'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/bestvideo+bestaudio/best',
+    );
     args.push('--merge-output-format', 'mp4');
-    args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
+    args.push('-o', path.join(outputPath, outputTemplate));
   } else {
-    args.push('-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4');
-    args.push('-o', path.join(outputPath, `${safeName}.%(ext)s`));
+    args.push(
+      '-f',
+      'bestvideo+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best',
+      '--merge-output-format', 'mp4',
+    );
+    args.push('-o', path.join(outputPath, outputTemplate));
   }
 
   if (isYouTube) {
@@ -392,11 +420,76 @@ function softwareEncode(filePath, ffmpegPath, tmpPath, durationSecs, onProgress,
   swEncode.on('error', () => resolve(filePath));
 }
 
+function ensureAacAudio(filePath, ffmpegPath, onProgress) {
+  return new Promise((resolve) => {
+    if (!filePath || !filePath.endsWith('.mp4')) {
+      resolve(filePath);
+      return;
+    }
+
+    const probe = spawn(ffmpegPath, ['-i', filePath]);
+    let probeOutput = '';
+    probe.stderr.on('data', (d) => { probeOutput += d.toString(); });
+
+    const probeTimer = setTimeout(() => {
+      try { probe.kill('SIGKILL'); } catch {}
+    }, 10000);
+
+    probe.on('close', () => {
+      clearTimeout(probeTimer);
+      const hasAudio = /Audio:/i.test(probeOutput);
+      const hasNonAacAudio = /Audio:.*(?:opus|vorbis)/i.test(probeOutput);
+      const hasAacAudio = /Audio:.*(?:aac|mp4a)/i.test(probeOutput);
+
+      // Skip if no audio, already AAC, or no known non-AAC codec detected
+      if (!hasAudio || hasAacAudio || !hasNonAacAudio) {
+        resolve(filePath);
+        return;
+      }
+
+      const durationSecs = parseDurationSecs(probeOutput);
+      onProgress({ percent: 99.5, speed: '', eta: '', status: 'converting_audio', convertPercent: 0 });
+
+      const tmpPath = filePath.replace(/\.mp4$/, '.aac.tmp.mp4');
+      const proc = spawn(ffmpegPath, [
+        '-i', filePath,
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-movflags', '+faststart',
+        '-y',
+        tmpPath,
+      ]);
+
+      trackFfmpegProgress(proc, durationSecs, onProgress, 'converting_audio');
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          try {
+            fs.unlinkSync(filePath);
+            fs.renameSync(tmpPath, filePath);
+          } catch {}
+        } else {
+          try { fs.unlinkSync(tmpPath); } catch {}
+        }
+        resolve(filePath);
+      });
+
+      proc.on('error', () => resolve(filePath));
+    });
+
+    probe.on('error', () => {
+      clearTimeout(probeTimer);
+      resolve(filePath);
+    });
+  });
+}
+
 function startDownload(options, onProgress, onComplete, onError) {
   const ytdlp = getYtdlpPath();
   const ffmpegPath = getFfmpegPath();
   const ffmpegDir = path.dirname(ffmpegPath);
 
+  cleanStaleYtdlpTemp();
   const args = buildDownloadArgs({ ...options, ffmpegDir });
   console.log('[yt-dlp] spawn:', args.join(' '));
   const proc = spawn(ytdlp, args);
@@ -440,6 +533,7 @@ function startDownload(options, onProgress, onComplete, onError) {
       const filePath = parseState.lastFile;
       if (filePath && filePath.endsWith('.mp4')) {
         ensureMacCompatible(filePath, ffmpegPath, onProgress)
+          .then((compatPath) => ensureAacAudio(compatPath, ffmpegPath, onProgress))
           .then((finalPath) => onComplete(finalPath));
       } else {
         onComplete(filePath);
@@ -469,6 +563,7 @@ function fetchCarouselVideos(url) {
       url,
     ];
 
+    cleanStaleYtdlpTemp();
     const proc = spawn(ytdlp, args, { timeout: 60000 });
     let stdout = '';
     let stderr = '';
@@ -513,4 +608,4 @@ function fetchCarouselVideos(url) {
   });
 }
 
-module.exports = { fetchVideoInfo, startDownload, fetchCarouselVideos };
+module.exports = { fetchVideoInfo, startDownload, fetchCarouselVideos, cleanStaleYtdlpTemp };
