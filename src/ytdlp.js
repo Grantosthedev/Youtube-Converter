@@ -192,7 +192,7 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
   ];
 
   if (quality === 'audio') {
-    args.push('-f', 'bestaudio[ext=m4a]/bestaudio');
+    args.push('-f', 'bestaudio[ext=m4a]/bestaudio/best');
     args.push('-x', '--audio-format', 'm4a', '--audio-quality', '0');
     args.push('-o', path.join(outputPath, outputTemplate));
   } else if (isYouTube) {
@@ -255,6 +255,8 @@ function parseOutputLine(line, state, onProgress) {
   const destMatch = trimmed.match(/Destination:\s*(.+)/);
   if (destMatch) {
     state.lastFile = destMatch[1];
+    const basename = destMatch[1].split('/').pop().replace(/\.[^.]+$/, '');
+    if (basename) onProgress({ percent: 0, speed: '', eta: '', title: basename });
     return;
   }
 

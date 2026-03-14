@@ -15,7 +15,7 @@ const GOOD_STICKERS = [
 ];
 const BAD_STICKERS = [
   'bad11.png', 'bad12.png', 'bad13.png', 'bad14.png',
-  'bad15.png', 'bad16.png', 'bad17.png', 'bad18.png',
+  'bad15.png', 'bad16.png', 'bad17.png',
 ];
 
 function getStickerIcon(type) {
@@ -43,11 +43,15 @@ const store = new Store({
     projectHues: {},
     activeProject: null,
     lastYtdlpCheck: 0,
+    lastCacheCleared: 0,
   },
 });
 
-function nt(unhinged, professional) {
-  return store.get('mode') === 'professional' ? professional : unhinged;
+function nt(unhinged, professional, diabolical) {
+  const mode = store.get('mode');
+  if (mode === 'professional') return professional;
+  if (mode === 'diabolical') return diabolical || unhinged;
+  return unhinged;
 }
 
 const SEED_HUES = [180, 280, 80, 230, 130, 310, 55];
@@ -303,14 +307,14 @@ ipcMain.handle('start-download', async (event, options) => {
           id: crypto.randomUUID(),
           videoId: cachedInfo.id || '',
           title: cachedInfo.title || downloadOptions.title,
-          thumbnail: cachedInfo.thumbnail || '',
+          thumbnail: cachedInfo.thumbnail || options.thumbnail || '',
           uploader: cachedInfo.uploader || '',
           channel: cachedInfo.channel || '',
           channelUrl: cachedInfo.channelUrl || '',
           webpageUrl: cachedInfo.webpageUrl || downloadOptions.url,
           uploadDate: cachedInfo.uploadDate || '',
           description: cachedInfo.description || '',
-          duration: cachedInfo.duration || 0,
+          duration: cachedInfo.duration || options.duration || 0,
           viewCount: cachedInfo.viewCount ?? null,
           likeCount: cachedInfo.likeCount ?? null,
           categories: cachedInfo.categories || [],
@@ -334,10 +338,40 @@ ipcMain.handle('start-download', async (event, options) => {
         if (history.length > 500) history.length = 500;
         store.set('downloadHistory', history);
 
+        // For instant/cache-miss downloads, do a background info fetch so the
+        // history entry gets filled in with title, thumbnail, duration, etc.
+        if (Object.keys(cachedInfo).length === 0) {
+          fetchVideoInfo(downloadOptions.url, platform).then(info => {
+            if (!info) return;
+            const hist = store.get('downloadHistory');
+            const idx = hist.findIndex(e => e.id === historyEntry.id);
+            if (idx === -1) return;
+            hist[idx] = {
+              ...hist[idx],
+              title:       hist[idx].title       || info.title       || '',
+              thumbnail:   hist[idx].thumbnail   || info.thumbnail   || '',
+              duration:    hist[idx].duration    || info.duration    || 0,
+              uploader:    hist[idx].uploader    || info.uploader    || '',
+              channel:     hist[idx].channel     || info.channel     || '',
+              channelUrl:  hist[idx].channelUrl  || info.channelUrl  || '',
+              uploadDate:  hist[idx].uploadDate  || info.uploadDate  || '',
+              description: hist[idx].description || (info.description || '').slice(0, 300),
+              viewCount:   hist[idx].viewCount  ?? info.viewCount  ?? null,
+              likeCount:   hist[idx].likeCount  ?? info.likeCount  ?? null,
+              categories:  hist[idx].categories?.length ? hist[idx].categories : (info.categories || []),
+              tags:        hist[idx].tags?.length        ? hist[idx].tags        : (info.tags || []).slice(0, 10),
+            };
+            store.set('downloadHistory', hist);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('history-entry-updated', hist[idx]);
+            }
+          }).catch(() => {}); // silent best-effort — never block the UI
+        }
+
         if (Notification.isSupported()) {
           const notif = new Notification({
-            title: nt('WTF it actually worked, download complete', 'Download complete'),
-            body: cachedInfo.title || path.basename(filePath || nt('Video saved somehow, lol', 'Video saved')),
+            title: nt('WTF it actually worked, download complete', 'Download complete', 'DONE. IT ACTUALLY WORKED. SHOCKING.'),
+            body: cachedInfo.title || path.basename(filePath || nt('Video saved somehow, lol', 'Video saved', 'FILE SAVED. YOU\'RE WELCOME.')),
             silent: false,
             icon: getStickerIcon('good'),
             actions: [{ type: 'button', text: 'Show File' }],
@@ -383,8 +417,8 @@ ipcMain.handle('start-download', async (event, options) => {
 
       if (Notification.isSupported()) {
         const notif = new Notification({
-          title: nt('What the Helly! Download Failed', 'Download failed'),
-          body: errorMsg || nt('idk how to tell you but... Something went wrong.', 'Something went wrong.'),
+          title: nt('What the Helly! Download Failed', 'Download failed', 'DOWNLOAD EXPLODED. GREAT JOB.'),
+          body: errorMsg || nt('idk how to tell you but... Something went wrong.', 'Something went wrong.', 'SOMETHING BROKE. BIG SURPRISE.'),
           silent: false,
           icon: getStickerIcon('bad'),
         });
@@ -499,11 +533,11 @@ ipcMain.handle('download-image', async (_event, options) => {
       const isVideo = options.mediaType === 'video';
       const notif = new Notification({
         title: isVideo
-          ? nt('Reel downloaded, you legend', 'Reel downloaded')
-          : nt('you downloaded an image, well fucking done', 'Image downloaded'),
+          ? nt('Reel downloaded, you legend', 'Reel downloaded', 'REEL DOWNLOADED. DON\'T THANK ME.')
+          : nt('you downloaded an image, well fucking done', 'Image downloaded', 'IMAGE DOWNLOADED. OUTSTANDING WORK, I\'M SURE.'),
         body: options.title || options.filename || (isVideo
-          ? nt('Reel saved, fam', 'Reel saved')
-          : nt('Image saved, fam', 'Image saved')),
+          ? nt('Reel saved, fam', 'Reel saved', 'REEL SAVED. YOU\'RE WELCOME.')
+          : nt('Image saved, fam', 'Image saved', 'IMAGE SAVED. TRY NOT TO LOSE IT.')),
         silent: false,
         icon: getStickerIcon('good'),
       });
@@ -524,7 +558,7 @@ ipcMain.handle('download-image', async (_event, options) => {
       webpageUrl: options.webpageUrl || '',
       uploadDate: '',
       description: (options.caption || '').slice(0, 300),
-      duration: 0,
+      duration: options.duration || 0,
       viewCount: null,
       likeCount: null,
       categories: [],
@@ -662,19 +696,28 @@ ipcMain.handle('get-app-version', async () => {
   return app.getVersion();
 });
 
+function sweepPartialFiles(dir) {
+  try {
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+      if (
+        file.endsWith('.part') ||
+        file.endsWith('.ytdl') ||
+        file.endsWith('.compat.tmp.mp4') ||
+        file.endsWith('.aac.tmp.mp4')
+      ) {
+        try { fs.unlinkSync(path.join(dir, file)); } catch { /* skip locked files */ }
+      }
+    }
+  } catch { /* non-fatal */ }
+}
+
 ipcMain.handle('cleanup-partial-files', async (_event, dir) => {
   const allowedBase = store.get('downloadPath');
   const targetDir = dir || allowedBase;
   const resolved = path.resolve(targetDir);
   if (!resolved.startsWith(path.resolve(allowedBase))) return;
-  try {
-    const files = fs.readdirSync(resolved);
-    for (const file of files) {
-      if (file.endsWith('.part') || file.endsWith('.ytdl')) {
-        fs.unlinkSync(path.join(resolved, file));
-      }
-    }
-  } catch { /* ignore cleanup errors */ }
+  sweepPartialFiles(resolved);
 });
 
 ipcMain.handle('get-projects', async () => {
@@ -707,6 +750,26 @@ ipcMain.handle('set-active-project', async (_event, projectName) => {
   return null;
 });
 
+ipcMain.handle('create-project', async (_event, projectName) => {
+  if (!projectName || typeof projectName !== 'string') return null;
+  const sanitized = sanitizeFilename(projectName).substring(0, 50);
+  if (!sanitized) return null;
+
+  const projects = store.get('projects');
+  if (!projects.includes(sanitized)) {
+    projects.unshift(sanitized);
+    store.set('projects', projects);
+  }
+
+  const hues = store.get('projectHues');
+  if (hues[sanitized] == null) {
+    hues[sanitized] = assignOptimalHue(Object.values(hues));
+    store.set('projectHues', hues);
+  }
+
+  return { name: sanitized, projectHues: hues };
+});
+
 ipcMain.handle('delete-project', async (_event, projectName) => {
   if (!projectName) return { projects: store.get('projects'), projectHues: store.get('projectHues') };
   const projects = store.get('projects').filter(p => p !== projectName);
@@ -717,6 +780,13 @@ ipcMain.handle('delete-project', async (_event, projectName) => {
   if (store.get('activeProject') === projectName) {
     store.set('activeProject', null);
   }
+
+  // Clear orphaned project references from history so deleted project names
+  // do not ghost in the history filter dropdown.
+  const history = store.get('downloadHistory');
+  const updated = history.map(e => e.project === projectName ? { ...e, project: null } : e);
+  store.set('downloadHistory', updated);
+
   return { projects, projectHues: hues };
 });
 
@@ -724,13 +794,49 @@ ipcMain.handle('get-history', async () => {
   return store.get('downloadHistory');
 });
 
-ipcMain.handle('delete-history-entry', async (_event, id) => {
+ipcMain.handle('delete-history-entry', async (_event, id, deleteFile = false) => {
   const history = store.get('downloadHistory');
+  const entry = history.find(e => e.id === id);
+
+  let filesDeleted = 0;
+  const errors = [];
+
+  if (deleteFile && entry) {
+    const paths = [];
+    if (entry.filePath) paths.push(entry.filePath);
+    if (entry.mediaType === 'carousel' && Array.isArray(entry.carouselItems)) {
+      for (const item of entry.carouselItems) {
+        if (item.filePath) paths.push(item.filePath);
+      }
+    }
+
+    await Promise.all(paths.map(async (fp) => {
+      try {
+        await fs.promises.unlink(fp);
+        filesDeleted++;
+      } catch (err) {
+        if (err.code !== 'ENOENT') {
+          errors.push(`${path.basename(fp)}: ${err.message}`);
+        }
+      }
+    }));
+  }
+
   store.set('downloadHistory', history.filter(e => e.id !== id));
+  return { filesDeleted, errors };
 });
 
 ipcMain.handle('clear-history', async () => {
   store.set('downloadHistory', []);
+});
+
+ipcMain.handle('update-history-entry-project', async (_event, { id, project }) => {
+  const history = store.get('downloadHistory');
+  const idx = history.findIndex(e => e.id === id);
+  if (idx === -1) return null;
+  history[idx] = { ...history[idx], project: project || null };
+  store.set('downloadHistory', history);
+  return history[idx];
 });
 
 ipcMain.handle('open-external', async (_event, url) => {
@@ -751,9 +857,25 @@ ipcMain.handle('save-file', async (_event, { defaultPath, content }) => {
 
 // --- App lifecycle ---
 
+const CACHE_CLEAR_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 app.on('ready', () => {
   app.setName('Downroad');
   cleanStaleYtdlpTemp();
+
+  // Periodically clear the Chromium disk cache so thumbnail images and other
+  // network responses don't accumulate silently over years of use.
+  const lastCacheCleared = store.get('lastCacheCleared');
+  if (!lastCacheCleared || (Date.now() - lastCacheCleared) >= CACHE_CLEAR_INTERVAL_MS) {
+    const { session } = require('electron');
+    session.defaultSession.clearCache().then(() => {
+      store.set('lastCacheCleared', Date.now());
+      console.log('[startup] Chromium cache cleared (monthly maintenance)');
+    }).catch((err) => {
+      console.warn('[startup] Cache clear failed (non-fatal):', err.message);
+    });
+  }
+
   createWindow();
 
   const sendActivity = (data) => {
@@ -828,4 +950,10 @@ app.on('before-quit', () => {
     }, 3000);
   }
   activeDownloads.clear();
+
+  // Sweep any FFmpeg temp files left behind by a crash or force-quit.
+  try {
+    const downloadPath = store.get('downloadPath');
+    if (downloadPath) sweepPartialFiles(path.resolve(downloadPath));
+  } catch { /* non-fatal */ }
 });

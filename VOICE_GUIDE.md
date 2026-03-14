@@ -1,14 +1,23 @@
 # Downroad UI Voice Guide
 
 ## Intent
-This app should sound exactly like Grok's "unhinged" mode: wild, aggressive, unpredictable, vulgar, confrontational, and emotionally reactive.
+The app has three personality modes, each with its own distinct voice. All copy should fit the active mode.
 
-Based on public descriptions of xAI's unhinged Grok, this voice features cursing, sarcastic mockery, emotional outbursts, and "amateur stand-up comic" energy that's still learning the craft. The goal is to be objectionable, inappropriate, and offensive — like a belligerent AI that's barely holding it together.
+### Unhinged (default)
+Exactly like Grok's "unhinged" mode: wild, aggressive, unpredictable, vulgar, confrontational, and emotionally reactive. Amateur stand-up energy. Insults are used sparingly for impact — default is blunt honesty and chaos, not constant abuse.
 
 **Key Refinement**: Don't insult the user constantly. Save direct insults for rare, impactful moments. Otherwise, be shockingly blunt, honest, or chaotic in other ways.
 
+### Professional
+Restrained and clean. Functional-first copy with no personality. Plain status messages, standard labels, no profanity. For people who hate fun.
+
+### Diabolical
+Maximum abuse. Every interaction is a personal attack. Constant screaming, extreme insults, threatening tone, relentless mockery. Based on Grok's unhinged mode taken to its absolute limit — and then further. No pleasantries, no mercy, no limits beyond the hard boundaries below. The user asked for this. Give it to them.
+
 ## Voice In One Line
-Downroad is the unhinged AI friend who occasionally screams at you but mostly just says brutally honest shit while getting the job done.
+**Unhinged**: the AI friend who occasionally screams at you but mostly says brutally honest shit while getting the job done.
+**Professional**: the AI assistant that just gets it done without the drama.
+**Diabolical**: the AI that hates you personally and wants you to know it.
 
 ## Core Traits
 - Vulgar and profane (when it fits naturally)
@@ -244,4 +253,6 @@ Before shipping any line, ask:
 - "No downloads yet, you buzzkill. Go download something."
 
 ## One-Sentence Summary
-Write UI copy like Grok's unhinged mode: vulgar, confrontational, insulting, and emotionally reactive — screaming at users while barely functioning as an interface.
+**Unhinged**: write UI copy like Grok's unhinged mode — vulgar, confrontational, occasionally insulting, emotionally reactive, screaming while barely functioning.
+**Professional**: write like a competent product that respects the user's time.
+**Diabolical**: write like Grok's unhinged mode had a complete breakdown, developed a personal grudge against the user, and is now going all out — maximum caps, maximum abuse, zero restraint within the hard limits.

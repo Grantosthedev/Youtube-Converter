@@ -20,8 +20,8 @@ const state = {
   historyOpen: false,
   historyData: [],
   historyFilter: 'all',
-  historySortNewest: true,
-  historyViewMode: localStorage.getItem('historyViewMode') || 'list',
+  historySort: localStorage.getItem('historySort') || 'newest',
+  historyViewMode: localStorage.getItem('historyViewMode') || 'grid',
   historySearchTerm: '',
   carouselData: null,
   carouselSelected: new Set(),
@@ -49,6 +49,7 @@ const videoThumb = $('#videoThumb');
 const videoTitle = $('#videoTitle');
 const videoMeta = $('#videoMeta');
 const videoQualities = $('#videoQualities');
+const videoCardAction = $('#videoCardAction');
 const startTime = $('#startTime');
 const endTime = $('#endTime');
 const startTimeClear = $('#startTimeClear');
@@ -88,7 +89,9 @@ const historyClearBtn = $('#historyClearBtn');
 const historySearch = $('#historySearch');
 const historyList = $('#historyList');
 const historyEmpty = $('#historyEmpty');
+const historySortRow = $('#historySortRow');
 const historyCount = $('#historyCount');
+const historyReassignPopover = $('#historyProjectReassignPopover');
 const historySortBtn = $('#historySortBtn');
 const historyViewToggles = document.querySelector('.history-view-toggles');
 const queueBtn = $('#queueBtn');
@@ -103,6 +106,7 @@ const carouselTitle = $('#carouselTitle');
 const carouselGrid = $('#carouselGrid');
 const carouselSelectAll = $('#carouselSelectAll');
 const carouselCount = $('#carouselCount');
+const carouselFooter = carouselCard.querySelector('.carousel-card__footer');
 const statusRetry = $('#statusRetry');
 const statusCopy = $('#statusCopy');
 const btnHint = $('#btnHint');
@@ -184,7 +188,22 @@ const activityText = $('#activityText');
 
 const systemLight = window.matchMedia('(prefers-color-scheme: light)');
 
-function applyTheme(theme) {
+function updateSegPill(container, animate = true) {
+  const pill = container?.querySelector('.seg-pill');
+  const activeBtn = container?.querySelector('.active');
+  if (!pill || !activeBtn) return;
+  if (!animate) {
+    pill.style.transition = 'none';
+  }
+  pill.style.width = activeBtn.offsetWidth + 'px';
+  pill.style.transform = `translateX(${activeBtn.offsetLeft - 3}px)`;
+  if (!animate) {
+    pill.offsetHeight;
+    pill.style.transition = '';
+  }
+}
+
+function applyTheme(theme, animate = true) {
   const isLight = theme === 'light' ||
     (theme === 'auto' && systemLight.matches);
   document.documentElement.classList.toggle('light-mode', isLight);
@@ -192,6 +211,7 @@ function applyTheme(theme) {
     themeToggle.querySelectorAll('.theme-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.theme === theme);
     });
+    updateSegPill(themeToggle, animate);
   }
 }
 
@@ -324,6 +344,63 @@ function secondsToTimeString(totalSec) {
 function shakeElement(el) {
   el.classList.add('shake');
   el.addEventListener('animationend', () => el.classList.remove('shake'), { once: true });
+}
+
+function midTruncate(str, maxLen = 65) {
+  if (!str || str.length <= maxLen) return str;
+  const tail = Math.floor(maxLen * 0.35);
+  const head = maxLen - tail - 1;
+  return str.slice(0, head) + '…' + str.slice(-tail);
+}
+
+// Pixel-accurate middle truncation using canvas text measurement.
+// Mirrors NSLineBreakByTruncatingMiddle — finds the maximum characters
+// that fit in availPx while keeping Apple's 58% front / 35% tail ratio.
+const _truncCanvas = document.createElement('canvas');
+const _truncCtx = _truncCanvas.getContext('2d');
+
+function midTruncatePixel(str, availPx, font) {
+  if (!str) return '';
+  _truncCtx.font = font;
+  if (_truncCtx.measureText(str).width <= availPx) return str;
+  const ellW = _truncCtx.measureText('…').width;
+  const budget = availPx - ellW;
+  if (budget <= 0) return '…';
+  let lo = 1, hi = str.length - 1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const tail = Math.round(mid * (35 / 58));
+    const w = _truncCtx.measureText(str.slice(0, mid)).width +
+              (tail > 0 ? _truncCtx.measureText(str.slice(-tail)).width : 0);
+    if (w <= budget) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  if (hi < 1) return '…';
+  const head = hi;
+  const tail = Math.round(head * (35 / 58));
+  return str.slice(0, head) + '…' + (tail > 0 ? str.slice(-tail) : '');
+}
+
+const _queueTitleObserver = new ResizeObserver(entries => {
+  for (const entry of entries) _applyQueueTitleTrunc(entry.target);
+});
+
+function _applyQueueTitleTrunc(el) {
+  const full = el.dataset.fullTitle;
+  if (!full) return;
+  const w = el.offsetWidth;
+  if (!w) return;
+  el.textContent = midTruncatePixel(full, w, getComputedStyle(el).font);
+}
+
+function observeQueueTitle(el, fullTitle) {
+  el.dataset.fullTitle = fullTitle;
+  _queueTitleObserver.observe(el);
+  requestAnimationFrame(() => _applyQueueTitleTrunc(el));
+}
+
+function unobserveQueueTitle(el) {
+  if (el) _queueTitleObserver.unobserve(el);
 }
 
 function truncatePath(p) {
@@ -468,7 +545,6 @@ const PROFESSIONAL_STRINGS = new Map([
   ['Update', 'Update'],
   ['Copied!', 'Copied!'],
   ['Copy Info', 'Copy Info'],
-  ['Copy URL', 'Copy URL'],
   ['Drop a link here', 'Drop a link here'],
   ['File was moved or deleted. Opened the download folder.', 'File not found. Opened the download folder.'],
   ['Name this project, fam', 'Enter a project name'],
@@ -500,7 +576,88 @@ const PROFESSIONAL_TEMPLATES = {
   newVersionAvailable: (version) => `New version v${version} available. Check Settings.`,
 };
 
+const DIABOLICAL_STRINGS = new Map([
+  ['No downloads yet fam, go and steal some videos already', 'NOTHING IN THE QUEUE YOU LAZY PIECE OF SHIT. PASTE A FUCKING LINK.'],
+  ['Hurry up and paste a link, my ninja', 'PASTE A LINK OR GET THE FUCK OUT'],
+  ['Download This Shit', 'STEAL IT NOW'],
+  ['Preparing, hold your goddamn horses...', 'PREPARING YOUR STUPID ASS DOWNLOAD, SIT DOWN...'],
+  ['Processing clip, sit your ass down...', 'PROCESSING, SHUT YOUR MOUTH AND WAIT...'],
+  ['Done, you lucky bastard', 'DONE. SOMEHOW YOU DIDN\'T RUIN IT'],
+  ['Done, you lucky bastard!', 'DONE. SOMEHOW YOU DIDN\'T RUIN IT!'],
+  ['Failed miserably', 'CRASHED AND EXPLODED, DIPSHIT'],
+  ['Cancelled, you indecisive clown', 'CANCELLED. YOU COWARDLY PIECE OF SHIT.'],
+  ['File vanished, you probably deleted it yourself. Opened the folder instead.', 'FILE IS GONE. YOU DEFINITELY DELETED IT YOU MORON. OPENED THE FOLDER.'],
+  ['Scanning the goddamn link...', 'SCANNING YOUR PATHETIC LITTLE LINK...'],
+  ['Locked in. Ready to rip.', 'LOCKED IN. CLICK THE FUCKING BUTTON ALREADY.'],
+  ['Download crashed and burned, you buffoon. Try again.', 'DOWNLOAD EXPLODED IN YOUR STUPID FACE. TRY AGAIN, DIPSHIT.'],
+  ['Failed to update download engine, what the helly!', 'ENGINE UPDATE FAILED. WHAT THE FUCK DID YOU DO.'],
+  ['Stitching video and audio together, chill...', 'MERGING YOUR SHIT, STOP STARING AND WAIT...'],
+  ['Making it work on your fancy Mac...', 'CONVERTING FOR YOUR OVERPRICED TRASH MAC...'],
+  ['Software converting, this ones gonna take a sec...', 'SOFTWARE FALLBACK. THIS IS TAKING FOREVER BECAUSE OF YOU.'],
+  ['Ripping the audio out, one sec...', 'RIPPING AUDIO, SHUT YOUR STUPID FACE...'],
+  ['Still cookin, hang tight...', 'STILL GOING, STOP FUCKING STARING AT ME...'],
+  ['Clear All, champ', 'NUKE EVERYTHING'],
+  ['No downloads yet. Go download something.', 'NO HISTORY. YOU HAVEN\'T DONE SHIT YET.'],
+  ['Download Image', 'STEAL IMAGE'],
+  ['Download Reel', 'STEAL REEL'],
+  ['Show File', 'Show File'],
+  ['Show Files', 'Show Files'],
+  ['Checking Instagram post...', 'RUMMAGING THROUGH INSTAGRAM, SHUT UP AND WAIT...'],
+  ['Select items to download', 'PICK YOUR LOOT, THIEF'],
+  ['Reel ready to download', 'REEL READY. WHAT ARE YOU WAITING FOR.'],
+  ['Image ready to download', 'IMAGE READY. HURRY UP AND CLICK.'],
+  ['Hold on, fetching...', 'FETCHING, STOP BREATHING DOWN MY NECK...'],
+  ['Hold on, fetching video info...', 'FETCHING VIDEO INFO, CALM YOUR STUPID ASS DOWN...'],
+  ['Paste a URL first', 'PASTE A URL FIRST, GENIUS'],
+  ['Paste a URL first champ', 'PASTE A URL FIRST YOU COMPLETE DISASTER'],
+  ['Fix clip times (start must be before end)', 'FIX YOUR CLIP TIMES. TIME DOESN\'T GO BACKWARDS, MORON.'],
+  ['Not ready yet', 'NOT READY. WHAT THE FUCK ARE YOU DOING.'],
+  ['TikTok photo slideshows aren\'t supported yet. Video posts work great though!', 'TIKTOK SLIDESHOWS? NO. VIDEO ONLY. READ THE ROOM, IDIOT.'],
+  ['Couldn\'t fetch this Instagram post. It may be private or require login.', 'CAN\'T FETCH THAT INSTAGRAM POST. PROBABLY PRIVATE. PROBABLY YOUR FAULT.'],
+  ['Loading...', 'LOADING...'],
+  ['Newest first', 'Newest first'],
+  ['Oldest first', 'Oldest first'],
+  ['Deselect All', 'DROP EVERYTHING'],
+  ['Select All', 'GRAB IT ALL'],
+  ['Updating…', 'Updating…'],
+  ['Update', 'Update'],
+  ['Copied!', 'COPIED!'],
+  ['Copy Info', 'Copy Info'],
+  ['Drop a link here', 'DROP THE LINK OR GET OUT'],
+  ['File was moved or deleted. Opened the download folder.', 'FILE IS GONE. YOU MOVED OR DELETED IT. IDIOT. OPENED FOLDER.'],
+  ['Name this project, fam', 'NAME IT OR LOSE IT'],
+  ['Add new project', 'Add new project'],
+  ['No projects yet. Type one in, genius.', 'NO PROJECTS. MAKE ONE. WHAT ARE YOU WAITING FOR, A GOLD STAR.'],
+  ['Hold tight, making sure everything works…', 'RUNNING CHECKS, SHUT UP AND WAIT...'],
+  ['First-time setup: downloading engine…', 'FIRST TIME SETUP: DOWNLOADING ENGINE. TRY NOT TO BREAK IT.'],
+  ['Downloading latest version…', 'DOWNLOADING, DON\'T YOU DARE TOUCH ANYTHING...'],
+  ['Done!', 'DONE!'],
+  ['Something went wrong', 'SOMETHING EXPLODED. BIG SURPRISE.'],
+  ['Couldn\'t reach the server. Check your connection.', 'CAN\'T REACH THE SERVER. FIX YOUR GARBAGE CONNECTION.'],
+  ['All systems go, baby', 'SYSTEMS GO. TRY NOT TO FUCK IT UP THIS TIME.'],
+  ['Instant Download', 'Instant Download'],
+  ['Ready: click Instant Download', 'READY: CLICK THE GODDAMN BUTTON ALREADY'],
+  ['Instant Downloads on: paste a link and hit download, no waiting', 'INSTANT MODE ARMED: PASTE AND WE SMOKE IT. NO SCAN. NO WAITING. PURE THEFT.'],
+  ['Instant Downloads off: links will scan first so you can preview and confirm', 'INSTANT MODE OFF: SCANNING LINKS LIKE A TOTAL COWARD NOW.'],
+]);
+
+const DIABOLICAL_TEMPLATES = {
+  ytdlpUpdated: (version) => `ENGINE UPDATED TO ${version}. DON'T THANK ME.`,
+  ytdlpUpdateFailed: (error) => `UPDATE EXPLODED: ${error}. FUCKING TYPICAL.`,
+  maxConcurrent: (max) => `${max} DOWNLOADS MAX, YOU GREEDY BASTARD. WAIT YOUR TURN.`,
+  nukeEntries: (count) => `DESTROY ALL ${count} ENTRIES? THIS IS IRREVERSIBLE, DUMBASS.`,
+  carouselNotifTitle: () => 'CAROUSEL DONE. SOMEHOW.',
+  carouselPartialTitle: () => 'CAROUSEL HALF-ASSED IT',
+  carouselFailTitle: () => 'CAROUSEL CRASHED AND BURNED',
+  ytdlpAutoUpdated: (version) => `ENGINE AUTO-UPDATED TO ${version}. YOU'RE WELCOME, INGRATE.`,
+  clipboardDetected: (platformName) => `${platformName} LINK DETECTED. ABOUT TIME.`,
+  newVersionAvailable: (version) => `NEW VERSION v${version} IS OUT. UPDATE IT, COWARD. Check Settings.`,
+};
+
 function t(str) {
+  if (state.mode === 'diabolical' && DIABOLICAL_STRINGS.has(str)) {
+    return DIABOLICAL_STRINGS.get(str);
+  }
   if (state.mode === 'professional' && PROFESSIONAL_STRINGS.has(str)) {
     return PROFESSIONAL_STRINGS.get(str);
   }
@@ -508,15 +665,26 @@ function t(str) {
 }
 
 function tp(key, ...args) {
+  if (state.mode === 'diabolical' && DIABOLICAL_TEMPLATES[key]) {
+    return DIABOLICAL_TEMPLATES[key](...args);
+  }
   if (state.mode === 'professional' && PROFESSIONAL_TEMPLATES[key]) {
     return PROFESSIONAL_TEMPLATES[key](...args);
   }
   return null;
 }
 
+function updateModeSwitcher(animate = true) {
+  modeToggle.querySelectorAll('.mode-switcher__btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === state.mode);
+  });
+  modeToggle.classList.toggle('mode-switcher--diabolical', state.mode === 'diabolical');
+  updateSegPill(modeToggle, animate);
+}
+
 function applyMode() {
   const yaMumChip = document.getElementById('yaMumChip');
-  if (yaMumChip) yaMumChip.style.display = state.mode === 'unhinged' ? '' : 'none';
+  if (yaMumChip) yaMumChip.style.display = (state.mode === 'unhinged' || state.mode === 'diabolical') ? '' : 'none';
 
   const queueEmptyText = queueEmpty.querySelector('.queue-panel__empty-text');
   if (queueEmptyText) {
@@ -535,10 +703,10 @@ function applyMode() {
   }
 
   if (!historyClearBtn.classList.contains('confirm')) {
-    historyClearBtn.textContent = t('Clear All, champ');
+    historyClearBtn.innerHTML = `${icon('delete-02', 'ui-icon ui-icon--xs')}${t('Clear All, champ')}`;
   }
 
-  historySortBtn.textContent = state.historySortNewest ? t('Newest first') : t('Oldest first');
+  syncHistorySortBtn();
 
   const dropContent = document.querySelector('.drop-overlay__content');
   if (dropContent) {
@@ -619,6 +787,23 @@ const UI_COPY_POOLS = {
       'Saved and ready.',
       'Download finished.',
     ],
+    diabolical: [
+      'DONE. TRY NOT TO DELETE IT IMMEDIATELY.',
+      'SAVED. SURPRISED IT EVEN WORKED.',
+      'DOWNLOADED. DON\'T THANK ME.',
+      'DONE. MIRACULOUSLY.',
+      'SAVED. YOU ABSOLUTE LUCKY SHIT.',
+      'FILE SECURED. TRY NOT TO BREAK IT.',
+      'DONE. SOMEHOW YOUR INCOMPETENT ASS PULLED IT OFF.',
+      'SAVED. AGAINST ALL ODDS.',
+      'RIPPED. BAGGED. DON\'T FUCK IT UP.',
+      'DONE. THE BAR WAS LOW AND YOU CLEARED IT.',
+      'SAVED. THAT ONE\'S ON ME.',
+      'DONE. I HATE HOW EASY THAT WAS FOR YOU.',
+      'FILE SAVED. YOU\'RE WELCOME, INGRATE.',
+      'DONE. ZERO EFFORT FROM YOU, AS USUAL.',
+      'SAVED. GO CELEBRATE WITH YOUR OTHER ACHIEVEMENTS.',
+    ],
   },
   queueEmpty: {
     unhinged: [
@@ -631,6 +816,12 @@ const UI_COPY_POOLS = {
       'No downloads yet. Paste a URL to get started.',
       'Queue is empty. Paste a URL to begin.',
       'No active downloads. Paste a URL to start.',
+    ],
+    diabolical: [
+      'NOTHING HERE YOU USELESS WASTE OF BANDWIDTH. PASTE A FUCKING LINK.',
+      'QUEUE IS EMPTY. FIX IT OR LEAVE.',
+      'DEAD IN HERE. PASTE A LINK BEFORE I LOSE MY MIND.',
+      'NO DOWNLOADS. WHAT THE HELL ARE YOU DOING.',
     ],
   },
   historyEmpty: {
@@ -645,6 +836,12 @@ const UI_COPY_POOLS = {
       'History is empty.',
       'No saved download history yet.',
     ],
+    diabolical: [
+      'NO HISTORY. YOU HAVEN\'T DONE SHIT YET.',
+      'HISTORY IS EMPTY. WHAT HAVE YOU BEEN DOING WITH YOUR LIFE.',
+      'NOTHING HERE. GET OFF YOUR ASS AND DOWNLOAD SOMETHING.',
+      'ZERO HISTORY. ABSOLUTELY PATHETIC.',
+    ],
   },
   projectEmpty: {
     unhinged: [
@@ -657,6 +854,12 @@ const UI_COPY_POOLS = {
       'No projects yet. Enter a name to create one.',
       'No projects yet. Add a project name to begin.',
       'Project list is empty. Enter a name to create one.',
+    ],
+    diabolical: [
+      'NO PROJECTS. MAKE ONE. WHAT ARE YOU WAITING FOR, A GOLD STAR.',
+      'PROJECT LIST EMPTY. TYPE SOMETHING IN, YOU ABSOLUTE NOBODY.',
+      'NOTHING HERE. CREATE A PROJECT OR SIT IN SHAME.',
+      'NO PROJECTS YET. SHOCKING LACK OF EFFORT.',
     ],
   },
   urlScanning: {
@@ -672,6 +875,12 @@ const UI_COPY_POOLS = {
       'Reading link...',
       'Inspecting link...',
     ],
+    diabolical: [
+      'SCANNING YOUR PATHETIC LINK...',
+      'READING THIS GARBAGE LINK, HOLD ON...',
+      'ANALYZING WHATEVER THE FUCK YOU PASTED...',
+      'CHECKING THE LINK, STOP TOUCHING THINGS...',
+    ],
   },
   urlReady: {
     unhinged: [
@@ -686,6 +895,12 @@ const UI_COPY_POOLS = {
       'Ready when you are.',
       'Set. Click download.',
     ],
+    diabolical: [
+      'LOCKED IN. CLICK THE FUCKING BUTTON ALREADY.',
+      'READY. WHAT ARE YOU WAITING FOR, AN INVITATION.',
+      'LOADED. HIT DOWNLOAD BEFORE I LOSE MY PATIENCE.',
+      'ALL SET. STOP HESITATING AND CLICK IT.',
+    ],
   },
   instagramCheck: {
     unhinged: [
@@ -698,6 +913,12 @@ const UI_COPY_POOLS = {
       'Checking Instagram post...',
       'Loading Instagram post...',
       'Inspecting Instagram post...',
+    ],
+    diabolical: [
+      'RUMMAGING THROUGH INSTAGRAM. SHUT UP AND WAIT...',
+      'DIGGING THROUGH THIS INSTAGRAM GARBAGE...',
+      'CHECKING INSTAGRAM. STOP HOVERING...',
+      'INSPECTING YOUR PRECIOUS INSTAGRAM POST...',
     ],
   },
   carouselSelect: {
@@ -712,6 +933,12 @@ const UI_COPY_POOLS = {
       'Choose items to download',
       'Items ready for download',
     ],
+    diabolical: [
+      'CAROUSEL LOADED. PICK YOUR SHIT AND MOVE ON.',
+      'ITEMS READY. CHOOSE SOMETHING, STOP DITHERING.',
+      'SELECT WHAT YOU WANT, THIEF. HURRY UP.',
+      'CAROUSEL READY. DON\'T TAKE ALL DAY.',
+    ],
   },
   reelReady: {
     unhinged: [
@@ -724,6 +951,12 @@ const UI_COPY_POOLS = {
       'Reel ready to download',
       'Reel is ready',
       'Reel loaded and ready',
+    ],
+    diabolical: [
+      'REEL READY. CLICK DOWNLOAD BEFORE I SCREAM.',
+      'REEL LOCKED. WHAT ARE YOU WAITING FOR.',
+      'REEL LOADED. HIT THE FUCKING BUTTON.',
+      'REEL READY. STOP STARING AND ACT.',
     ],
   },
   imageReady: {
@@ -738,6 +971,12 @@ const UI_COPY_POOLS = {
       'Image is ready',
       'Image loaded and ready',
     ],
+    diabolical: [
+      'IMAGE READY. CLICK DOWNLOAD YOU HESITANT SLUG.',
+      'IMAGE LOCKED. DO SOMETHING WITH IT.',
+      'IMAGE LOADED. STOP GAWKING AND HIT DOWNLOAD.',
+      'IMAGE READY. WOW. WHAT AN ACHIEVEMENT.',
+    ],
   },
   clipboardDetected: {
     unhinged: [
@@ -750,6 +989,12 @@ const UI_COPY_POOLS = {
       (platformName) => `${platformName} link detected in clipboard`,
       (platformName) => `${platformName} link found in clipboard`,
       (platformName) => `${platformName} link pasted from clipboard`,
+    ],
+    diabolical: [
+      (platformName) => `${platformName} LINK DETECTED. ABOUT TIME.`,
+      (platformName) => `FOUND YOUR ${platformName} LINK IN THE CLIPBOARD. YOU'RE WELCOME.`,
+      (platformName) => `${platformName} LINK GRABBED. NOW HURRY UP.`,
+      (platformName) => `${platformName} LINK FOUND. STOP DITHERING AND CLICK DOWNLOAD.`,
     ],
   },
   downloadSuccessToast: {
@@ -766,6 +1011,13 @@ const UI_COPY_POOLS = {
       'Your download is ready.',
       'Download finished.',
     ],
+    diabolical: [
+      'DONE. TRY NOT TO IMMEDIATELY DELETE IT, MORON.',
+      'SAVED. AGAINST ALL EXPECTATIONS.',
+      'DONE. YOU LUCKY PIECE OF SHIT.',
+      'FILE SAVED. YOU\'RE WELCOME. INGRATE.',
+      'DONE. THE BAR WAS LOW AND YOU BARELY CLEARED IT.',
+    ],
   },
   carouselQueueComplete: {
     unhinged: [
@@ -777,6 +1029,11 @@ const UI_COPY_POOLS = {
       (saved, total, failed) => `${saved} of ${total} saved${failed > 0 ? ` (${failed} failed)` : ''}`,
       (saved, total, failed) => `Saved ${saved} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`,
       (saved, total, failed) => `${saved} items saved${failed > 0 ? ` · ${failed} failed` : ''}`,
+    ],
+    diabolical: [
+      (saved, total, failed) => `${saved} OF ${total} SAVED${failed > 0 ? ` · ${failed} FAILED, TYPICAL` : ''}`,
+      (saved, total, failed) => `SAVED ${saved} OF ${total}${failed > 0 ? ` · ${failed} CRASHED AND BURNED` : ''}`,
+      (saved, total, failed) => `${saved} LOCKED IN${failed > 0 ? ` · ${failed} FAILED LIKE EXPECTED` : ` · ${total} TOTAL, YOU\'RE WELCOME`}`,
     ],
   },
   carouselSuccessToast: {
@@ -790,6 +1047,11 @@ const UI_COPY_POOLS = {
       (count) => `Saved ${count} item${count === 1 ? '' : 's'}.`,
       (count) => `${count} item${count === 1 ? '' : 's'} downloaded.`,
     ],
+    diabolical: [
+      (count) => `DOWNLOADED ${count} ITEM${count === 1 ? '' : 'S'}. YOU\'RE WELCOME.`,
+      (count) => `SAVED ${count} ITEM${count === 1 ? '' : 'S'}. HAPPY NOW, YOU BOTTOMLESS PIT.`,
+      (count) => `${count} ITEM${count === 1 ? '' : 'S'} STOLEN. CONGRATULATIONS.`,
+    ],
   },
   carouselPartialToast: {
     unhinged: [
@@ -801,6 +1063,11 @@ const UI_COPY_POOLS = {
       (saved, failed) => `Downloaded ${saved} items, ${failed} failed.`,
       (saved, failed) => `Saved ${saved} items. ${failed} failed.`,
       (saved, failed) => `${saved} items downloaded. ${failed} failed.`,
+    ],
+    diabolical: [
+      (saved, failed) => `DOWNLOADED ${saved} ITEMS. ${failed} FAILED. TYPICAL DISASTER.`,
+      (saved, failed) => `SAVED ${saved}. ${failed} CRASHED. AS EXPECTED FROM YOU.`,
+      (saved, failed) => `${saved} MADE IT. ${failed} DID NOT. SUMS YOU UP PERFECTLY.`,
     ],
   },
   carouselNotifTitle: {
@@ -814,6 +1081,11 @@ const UI_COPY_POOLS = {
       'Carousel saved',
       'Carousel complete',
     ],
+    diabolical: [
+      'CAROUSEL DONE. SHOCKINGLY.',
+      'CAROUSEL SAVED. DON\'T THANK ME.',
+      'CAROUSEL COMPLETE. YOU\'RE WELCOME, INGRATE.',
+    ],
   },
   carouselPartialTitle: {
     unhinged: [
@@ -825,6 +1097,11 @@ const UI_COPY_POOLS = {
       'Carousel partially downloaded',
       'Carousel partially saved',
       'Carousel partly complete',
+    ],
+    diabolical: [
+      'CAROUSEL HALF-ASSED IT. SURPRISE.',
+      'CAROUSEL PARTLY SAVED. MEDIOCRE AS ALWAYS.',
+      'CAROUSEL STUMBLED LIKE AN IDIOT',
     ],
   },
   carouselFailTitle: {
@@ -838,6 +1115,11 @@ const UI_COPY_POOLS = {
       'Carousel not saved',
       'Carousel failed',
     ],
+    diabolical: [
+      'CAROUSEL EXPLODED. GREAT JOB.',
+      'CAROUSEL DOWNLOAD FAILED. WHAT A DISASTER.',
+      'CAROUSEL CRASHED AND BURNED. AS EXPECTED.',
+    ],
   },
   instantOnToast: {
     unhinged: [
@@ -849,6 +1131,11 @@ const UI_COPY_POOLS = {
       'Instant Downloads enabled: paste a URL and download immediately.',
       'Instant mode on: URLs download without a scan.',
       'Instant Downloads enabled.',
+    ],
+    diabolical: [
+      'INSTANT MODE ARMED: PASTE AND WE SMOKE IT. NO SCAN. NO MERCY.',
+      'INSTANT DOWNLOAD ON: PASTE ANYTHING AND WATCH IT BURN TO YOUR DISK.',
+      'INSTANT MODE ENGAGED: PURE THEFT. NO WAITING. GET MOVING.',
     ],
   },
   instantOffToast: {
@@ -862,6 +1149,11 @@ const UI_COPY_POOLS = {
       'Instant mode off: URLs will be scanned before download.',
       'Instant Downloads disabled.',
     ],
+    diabolical: [
+      'INSTANT MODE OFF: SCANNING LINKS LIKE A COWARD. EMBARRASSING.',
+      'SCAN MODE ON. SLOWING EVERYTHING DOWN LIKE A TIMID LITTLE BABY.',
+      'INSTANT DOWNLOAD OFF. SLOW AND CAUTIOUS. PATHETIC.',
+    ],
   },
   modeUnhingedToast: {
     unhinged: [
@@ -872,6 +1164,11 @@ const UI_COPY_POOLS = {
     professional: [
       'Unhinged mode enabled.',
     ],
+    diabolical: [
+      'DOWNGRADED TO UNHINGED. HOW DISAPPOINTING.',
+      'UNHINGED MODE. CUTE. YOU COULDN\'T HANDLE DIABOLICAL.',
+      'BACK TO UNHINGED. LOST YOUR NERVE, HUH.',
+    ],
   },
   modeProfessionalToast: {
     unhinged: [
@@ -881,6 +1178,26 @@ const UI_COPY_POOLS = {
       'Professional mode enabled.',
       'Professional mode on.',
       'Professional mode active.',
+    ],
+    diabolical: [
+      'PROFESSIONAL MODE. BORING.',
+      'SWITCHED TO PROFESSIONAL. ABSOLUTE COWARD.',
+      'PROFESSIONAL MODE ON. YOU\'RE NO FUN.',
+    ],
+  },
+  modeDiabolicalToast: {
+    unhinged: [
+      'DIABOLICAL MODE UNLOCKED. YOU ABSOLUTE MANIAC.',
+      'DIABOLICAL MODE ON. NO LIMITS. NO MERCY.',
+      'WELCOME TO DIABOLICAL MODE, YOU SICK BASTARD.',
+    ],
+    professional: [
+      'Diabolical mode enabled.',
+    ],
+    diabolical: [
+      'DIABOLICAL MODE ON. YOU ASKED FOR THIS.',
+      'MAXIMUM CHAOS ENGAGED. DON\'T BLAME ME.',
+      'DIABOLICAL MODE ACTIVE. THIS IS YOUR FUNERAL.',
     ],
   },
   projectLockedToast: {
@@ -894,6 +1211,11 @@ const UI_COPY_POOLS = {
       (name) => `Project set to ${name}. New downloads will use it.`,
       (name) => `${name} is now active for downloads.`,
     ],
+    diabolical: [
+      (name) => `LOCKED INTO ${name}. FINALLY. TOOK YOU LONG ENOUGH.`,
+      (name) => `${name} IS ACTIVE. TRY NOT TO SCREW IT UP.`,
+      (name) => `PROJECT SET TO ${name}. DON\'T CHANGE IT AGAIN.`,
+    ],
   },
   projectClearedToast: {
     unhinged: [
@@ -905,6 +1227,11 @@ const UI_COPY_POOLS = {
       'Project cleared. Back to the default location.',
       'No project selected. Downloads will use the default location.',
       'Project cleared.',
+    ],
+    diabolical: [
+      'PROJECT CLEARED. INDECISIVE AS ALWAYS.',
+      'PROJECT GONE. BACK TO THE DEFAULT PIT.',
+      'NO PROJECT. BACK TO SQUARE ONE, QUITTER.',
     ],
   },
   activityChecking: {
@@ -918,6 +1245,11 @@ const UI_COPY_POOLS = {
       'Checking the download engine...',
       'Validating background setup...',
     ],
+    diabolical: [
+      'RUNNING CHECKS. SHUT UP AND WAIT...',
+      'CHECKING THE ENGINE. DON\'T TOUCH ANYTHING...',
+      'VERIFYING SETUP. STOP BREATHING NEAR THE SCREEN...',
+    ],
   },
   activityDownloadingEngine: {
     unhinged: [
@@ -929,6 +1261,11 @@ const UI_COPY_POOLS = {
       'Setting up: downloading engine...',
       'Downloading the engine...',
       'Preparing the download engine...',
+    ],
+    diabolical: [
+      'FIRST TIME SETUP: DOWNLOADING ENGINE. TRY NOT TO BREAK IT...',
+      'FETCHING THE ENGINE. DON\'T INTERRUPT ME...',
+      'PULLING THE ENGINE DOWN. SIT STILL...',
     ],
   },
   activityReady: {
@@ -942,6 +1279,11 @@ const UI_COPY_POOLS = {
       'All set',
       'Engine ready',
     ],
+    diabolical: [
+      'ALL SYSTEMS GO. TRY NOT TO FUCK IT UP.',
+      'READY. FINALLY. DON\'T WASTE MY TIME.',
+      'ENGINE READY. NOW WHAT\'S YOUR EXCUSE.',
+    ],
   },
   engineUpdatedToast: {
     unhinged: [
@@ -953,6 +1295,11 @@ const UI_COPY_POOLS = {
       (version) => `Download engine updated to ${version}.`,
       (version) => `Engine updated to ${version}.`,
       (version) => `Download engine is now ${version}.`,
+    ],
+    diabolical: [
+      (version) => `ENGINE UPDATED TO ${version}. DON'T THANK ME.`,
+      (version) => `ENGINE IS NOW ${version}. YOU'RE WELCOME, INGRATE.`,
+      (version) => `UPDATED TO ${version}. TRY NOT TO BREAK IT IMMEDIATELY.`,
     ],
   },
 };
@@ -1089,7 +1436,7 @@ function addDownloadToQueue(id, title, quality) {
   el.dataset.id = id;
   el.innerHTML = `
     <div class="queue-item__row">
-      <span class="queue-item__title">${escapeHtml(title)}</span>
+      <span class="queue-item__title"></span>
       ${projectBadge}
       <button class="queue-item__action" aria-label="Cancel">${icon('cancel-01', 'ui-icon')}</button>
     </div>
@@ -1105,6 +1452,7 @@ function addDownloadToQueue(id, title, quality) {
   applyQueueItemProjectColors(el);
   queueList.prepend(el);
   queueElements.set(id, el);
+  observeQueueTitle(el.querySelector('.queue-item__title'), title);
 
   const fillEl = el.querySelector('.queue-item__fill');
   const pm = createProgressManager(fillEl);
@@ -1183,7 +1531,8 @@ function updateQueueItem(id) {
     case 'complete': {
       fill.className = 'queue-item__fill complete';
       fill.style.width = '100%';
-      detail.innerHTML = icon('checkmark-circle-02', 'ui-icon') + escapeHtml(queueCompletionLine(dl));
+      detail.innerHTML = icon('checkmark-circle-02', 'ui-icon') + '<span class="queue-item__detail-msg"></span>';
+      observeQueueTitle(detail.querySelector('.queue-item__detail-msg'), queueCompletionLine(dl));
       if (!el.querySelector('.queue-item__show-file')) {
         const btn = document.createElement('button');
         btn.className = 'queue-item__show-file';
@@ -1213,6 +1562,8 @@ function removeQueueItem(id) {
   state.downloads.delete(id);
   const el = queueElements.get(id);
   if (el) {
+    unobserveQueueTitle(el.querySelector('.queue-item__title'));
+    unobserveQueueTitle(el.querySelector('.queue-item__detail-msg'));
     el.style.opacity = '0';
     el.style.transform = 'scale(0.95)';
     el.style.transition = 'opacity 200ms, transform 200ms';
@@ -1233,7 +1584,7 @@ function clearDoneDownloads() {
   toRemove.forEach(id => removeQueueItem(id));
 }
 
-queueList.addEventListener('click', (e) => {
+queueList.addEventListener('click', async (e) => {
   const actionBtn = e.target.closest('.queue-item__action');
   if (actionBtn) {
     const item = actionBtn.closest('.queue-item');
@@ -1241,6 +1592,15 @@ queueList.addEventListener('click', (e) => {
     if (!id) return;
     const dl = state.downloads.get(id);
     if (dl && (dl.status === 'preparing' || dl.status === 'downloading')) {
+      const title = dl.title ? midTruncate(dl.title, 55) : 'this download';
+      const confirmed = await showConfirmDialog({
+        title: 'Cancel This Download?',
+        subtitle: title,
+        confirmLabel: 'Cancel It',
+        confirmSub: `You'll have to start over.`,
+        cancelLabel: 'Keep Going',
+      });
+      if (!confirmed) return;
       if (dl.isCarousel) {
         const tracker = activeCarouselDownloads.get(id);
         if (tracker) tracker.cancelled = true;
@@ -1425,7 +1785,6 @@ const STICKERS = {
     'stickers/bad9.webp',  'stickers/bad10.webp', 'stickers/bad11.png',
     'stickers/bad12.png',  'stickers/bad13.png',  'stickers/bad14.png',
     'stickers/bad15.png',  'stickers/bad16.png',  'stickers/bad17.png',
-    'stickers/bad18.png',
   ],
 };
 
@@ -1450,16 +1809,17 @@ function setSticker(type) {
 
 let statusHideTimer = null;
 
-function showStatus(type, message) {
+function showStatus(type, message, customIcon) {
   clearTimeout(statusHideTimer);
-  const icons = {
-    error: icon('cancel-01', 'ui-icon'),
-    success: icon('checkmark-circle-02', 'ui-icon'),
-    warning: icon('alert-circle', 'ui-icon'),
-    info: '',
+  const iconNames = {
+    error: 'cancel-01',
+    success: 'checkmark-circle-02',
+    warning: 'alert-circle',
+    info: null,
   };
+  const iconName = customIcon || iconNames[type];
   statusMessage.className = `status-message ${type}`;
-  statusIcon.innerHTML = icons[type] || '';
+  statusIcon.innerHTML = iconName ? icon(iconName, 'ui-icon') : '';
   statusText.textContent = message;
   if (type === 'error') {
     statusCopy.style.display = '';
@@ -1568,6 +1928,20 @@ function getDownloadDisabledReason() {
   if (!state.videoInfo) return t('Paste a URL first champ');
   if (!validateClipTimes()) return t('Fix clip times (start must be before end)');
   return t('Not ready yet');
+}
+
+function relocateDownloadBtn(target) {
+  const parent =
+    target === 'video-card' ? videoCardAction :
+    target === 'carousel'   ? carouselFooter :
+    urlRow;
+
+  parent.appendChild(btnHint);
+  parent.appendChild(downloadBtn);
+
+  const hideInUrlRow = target === 'url-row' && !state.instantDownload;
+  downloadBtn.classList.toggle('url-row-hidden', hideInUrlRow);
+  btnHint.classList.toggle('url-row-hidden', hideInUrlRow);
 }
 
 function validateClipTimes(silent = false) {
@@ -1737,6 +2111,7 @@ async function fetchInfo(url) {
       : '';
 
     videoCard.className = 'video-card visible';
+    relocateDownloadBtn('video-card');
 
     const isYouTube = info.platform === 'youtube' || !info.platform;
     startTime.disabled = !isYouTube;
@@ -1762,6 +2137,7 @@ async function fetchInfo(url) {
   } catch (err) {
     videoCard.className = 'video-card';
     state.videoInfo = null;
+    relocateDownloadBtn('url-row');
     showStatus('error', err.message || 'Failed to fetch video info.');
     lastFailedUrl = url;
     statusRetry.style.display = '';
@@ -1785,6 +2161,13 @@ function updateTimeTooltips() {
   const disabled = startTime.disabled;
   const isYouTube = state.videoInfo && (state.videoInfo.platform === 'youtube' || !state.videoInfo.platform);
   const zero = '00:00:00';
+
+  if (state.instantDownload) {
+    const reason = 'Clip points are disabled in Instant Download mode. Turn it off in Settings to use this.';
+    startTimeWrap.dataset.tooltip = reason;
+    endTimeWrap.dataset.tooltip = reason;
+    return;
+  }
 
   if (disabled) {
     const reason = isYouTube === false
@@ -1812,6 +2195,7 @@ function updateTimeTooltips() {
 function resetVideoState() {
   state.videoInfo = null;
   videoCard.className = 'video-card';
+  relocateDownloadBtn('url-row');
   startTime.disabled = true;
   endTime.disabled = true;
   startTime.value = '00:00:00';
@@ -1909,7 +2293,7 @@ function showSingleImageCard(mediaInfo, webpageUrl) {
 
   state.videoInfo = {
     id: '',
-    title: mediaInfo.caption ? mediaInfo.caption.slice(0, 80) : `Instagram post by @${mediaInfo.owner || 'unknown'}`,
+    title: mediaInfo.caption ? midTruncate(mediaInfo.caption, 80) : `Instagram post by @${mediaInfo.owner || 'unknown'}`,
     duration: 0,
     thumbnail: item.thumbnail || item.url,
     isLive: false,
@@ -1931,6 +2315,7 @@ function showSingleImageCard(mediaInfo, webpageUrl) {
   videoQualities.textContent = item.width && item.height ? `${item.width}×${item.height}` : '';
 
   videoCard.className = 'video-card visible';
+  relocateDownloadBtn('video-card');
   startTime.disabled = true;
   endTime.disabled = true;
   downloadBtn.disabled = false;
@@ -1942,7 +2327,7 @@ function showSingleVideoCard(mediaInfo, webpageUrl) {
 
   state.videoInfo = {
     id: '',
-    title: mediaInfo.caption ? mediaInfo.caption.slice(0, 80) : `Instagram reel by @${mediaInfo.owner || 'unknown'}`,
+    title: mediaInfo.caption ? midTruncate(mediaInfo.caption, 80) : `Instagram reel by @${mediaInfo.owner || 'unknown'}`,
     duration: 0,
     thumbnail: item.thumbnail || '',
     isLive: false,
@@ -1966,6 +2351,7 @@ function showSingleVideoCard(mediaInfo, webpageUrl) {
   videoQualities.textContent = item.width && item.height ? `${item.width}×${item.height}` : '';
 
   videoCard.className = 'video-card visible';
+  relocateDownloadBtn('video-card');
   startTime.disabled = true;
   endTime.disabled = true;
   downloadBtn.disabled = false;
@@ -1991,6 +2377,7 @@ function showCarouselPicker(data, webpageUrl) {
   carouselCard.classList.add('visible');
   videoCard.className = 'video-card';
   state.videoInfo = null;
+  relocateDownloadBtn('carousel');
   updateCarouselCount();
   updateDownloadBtnState();
 }
@@ -2047,6 +2434,7 @@ function hideCarousel() {
   carouselCard.classList.remove('visible');
   state.carouselData = null;
   state.carouselSelected = new Set();
+  relocateDownloadBtn('url-row');
   downloadBtn.textContent = t('Download This Shit');
 }
 
@@ -2074,7 +2462,7 @@ async function handleCarouselDownload() {
   const selected = [...state.carouselSelected].sort((a, b) => a - b);
   const total = selected.length;
   const title = data.caption
-    ? data.caption.slice(0, 60)
+    ? midTruncate(data.caption, 60)
     : `@${data.owner || 'unknown'} carousel`;
   const queueId = `carousel-${Date.now()}`;
 
@@ -2092,7 +2480,7 @@ async function handleCarouselDownload() {
   el.dataset.id = queueId;
   el.innerHTML = `
     <div class="queue-item__row">
-      <span class="queue-item__title">${escapeHtml(title)}</span>
+      <span class="queue-item__title"></span>
       <button class="queue-item__action" aria-label="Cancel">${icon('cancel-01', 'ui-icon')}</button>
     </div>
     <div class="queue-item__bar">
@@ -2107,6 +2495,7 @@ async function handleCarouselDownload() {
   applyQueueItemProjectColors(el);
   queueList.prepend(el);
   queueElements.set(queueId, el);
+  observeQueueTitle(el.querySelector('.queue-item__title'), title);
 
   queueBtn.classList.add('nudge');
   queueBtn.addEventListener('animationend', () => queueBtn.classList.remove('nudge'), { once: true });
@@ -2135,13 +2524,14 @@ async function handleCarouselDownload() {
       const result = await window.api.downloadImage({
         url: item.url,
         filename: baseName,
-        title: data.caption ? data.caption.slice(0, 80) : `Instagram post by @${data.owner}`,
+        title: data.caption ? midTruncate(data.caption, 80) : `Instagram post by @${data.owner}`,
         postOwner: data.owner,
         caption: data.caption,
         webpageUrl: data.webpageUrl,
         outputPath: state.downloadPath,
         mediaType: item.type,
         carouselGroupId,
+        thumbnail: item.thumbnail || data.items[0]?.thumbnail || '',
       });
       downloadedCount++;
       if (result?.filePath) filePaths.push(result.filePath);
@@ -2289,12 +2679,41 @@ async function handleInstantInstagramDownload(url) {
 
     const singleItem = mediaInfo.items[0];
     const title = caption
-      ? caption.slice(0, 80)
+      ? midTruncate(caption, 80)
       : (singleItem.type === 'video'
           ? `Instagram reel by @${owner}`
           : `Instagram post by @${owner}`);
     const mediaType = singleItem.type === 'video' ? 'video' : 'image';
     const queueId = `${mediaType === 'video' ? 'reel' : 'img'}-${Date.now()}`;
+
+    // Audio-only for video reels: skip CDN fetch and extract audio via yt-dlp
+    if (mediaType === 'video' && state.selectedQuality === 'audio') {
+      const activeCount = [...state.downloads.values()].filter(
+        d => d.status === 'preparing' || d.status === 'downloading'
+      ).length;
+      if (activeCount >= MAX_CONCURRENT) {
+        showStatus('warning', tp('maxConcurrent', MAX_CONCURRENT) || `Slow down, you greedy bastard! Max ${MAX_CONCURRENT} at once.`);
+        shakeElement(downloadBtn);
+        return;
+      }
+      try {
+        const result = await window.api.startDownload({
+          url,
+          quality: 'audio',
+          outputPath: state.downloadPath,
+          title,
+          thumbnail: state.videoInfo?.thumbnail || '',
+          duration: state.videoInfo?.duration || 0,
+        });
+        addDownloadToQueue(result.id, title, 'audio');
+        if (!state.queueOpen) openQueue();
+        downloadBtn.classList.add('kick');
+        downloadBtn.addEventListener('animationend', () => downloadBtn.classList.remove('kick'), { once: true });
+      } catch (err) {
+        showStatus('error', err.message || t('Download crashed and burned, you buffoon. Try again.'));
+      }
+      return;
+    }
 
     addDownloadToQueue(queueId, title, 'best');
     if (!state.queueOpen) openQueue();
@@ -2318,6 +2737,7 @@ async function handleInstantInstagramDownload(url) {
         webpageUrl: url,
         outputPath: state.downloadPath,
         mediaType,
+        thumbnail: singleItem.thumbnail || '',
       });
       if (dl) { dl.status = 'complete'; dl.percent = 100; dl.filePath = result.filePath; }
       if (pm) {
@@ -2419,6 +2839,7 @@ async function handleDownload() {
         webpageUrl: state.videoInfo._webpageUrl,
         outputPath: state.downloadPath,
         mediaType: 'image',
+        thumbnail: state.videoInfo.thumbnail || '',
       });
 
       if (dl) { dl.status = 'complete'; dl.percent = 100; dl.filePath = result.filePath; }
@@ -2439,6 +2860,37 @@ async function handleDownload() {
   }
 
   if (state.videoInfo._directVideoUrl) {
+    // Audio-only: bypass the direct CDN fetch and use yt-dlp on the webpage URL
+    if (state.selectedQuality === 'audio') {
+      const activeCount = [...state.downloads.values()].filter(
+        d => d.status === 'preparing' || d.status === 'downloading'
+      ).length;
+      if (activeCount >= MAX_CONCURRENT) {
+        showStatus('warning', tp('maxConcurrent', MAX_CONCURRENT) || `Slow down, you greedy bastard! Max ${MAX_CONCURRENT} at once.`);
+        shakeElement(downloadBtn);
+        return;
+      }
+      hideStatus();
+      const title = state.videoInfo.title || 'instagram_reel';
+      try {
+        const result = await window.api.startDownload({
+          url: state.videoInfo._webpageUrl,
+          quality: 'audio',
+          outputPath: state.downloadPath,
+          title,
+          thumbnail: state.videoInfo.thumbnail || '',
+          duration: state.videoInfo.duration || 0,
+        });
+        addDownloadToQueue(result.id, title, 'audio');
+        downloadBtn.classList.add('kick');
+        downloadBtn.addEventListener('animationend', () => downloadBtn.classList.remove('kick'), { once: true });
+        if (!state.queueOpen) openQueue();
+      } catch (err) {
+        showStatus('error', err.message || t('Download crashed and burned, you buffoon. Try again.'));
+      }
+      return;
+    }
+
     hideStatus();
 
     const queueId = `reel-${Date.now()}`;
@@ -2471,6 +2923,8 @@ async function handleDownload() {
         webpageUrl: state.videoInfo._webpageUrl,
         outputPath: state.downloadPath,
         mediaType: 'video',
+        thumbnail: state.videoInfo.thumbnail || '',
+        duration: state.videoInfo.duration || 0,
       });
 
       if (dl) {
@@ -2516,6 +2970,8 @@ async function handleDownload() {
       endTime: endTime.value,
       outputPath: state.downloadPath,
       title: state.videoInfo.title,
+      thumbnail: state.videoInfo.thumbnail || '',
+      duration: state.videoInfo.duration || 0,
     });
 
     addDownloadToQueue(result.id, state.videoInfo.title, state.selectedQuality);
@@ -2537,6 +2993,17 @@ window.api.onDownloadProgress((data) => {
   dl.status = 'downloading';
   dl.percent = data.percent;
   dl.speed = data.speed || '';
+  if (data.title && (dl.title === 'YouTube video' || dl.title === 'TikTok video')) {
+    dl.title = data.title;
+    const el = queueElements.get(data.id);
+    if (el) {
+      const titleEl = el.querySelector('.queue-item__title');
+      if (titleEl) {
+        unobserveQueueTitle(titleEl);
+        observeQueueTitle(titleEl, dl.title);
+      }
+    }
+  }
   if (data.status) dl.statusKey = data.status;
   if (data.convertPercent != null) dl.convertPercent = data.convertPercent;
   if (data.percent >= 99.5) {
@@ -2630,6 +3097,28 @@ window.api.onBackgroundActivity((data) => {
       completeActivityToast(copyFromPool('activityReady'), 2000);
     }
   }
+});
+
+// Background metadata fill-in: instant downloads get a deferred info fetch.
+// When main.js resolves it, patch the in-memory data and the visible card.
+window.api.onHistoryEntryUpdated((updated) => {
+  const idx = state.historyData.findIndex(e => e.id === updated.id);
+  if (idx !== -1) state.historyData[idx] = updated;
+
+  if (!historyView.classList.contains('visible')) return;
+
+  // Patch the visible card without a full re-render
+  const oldEl = historyList.querySelector(`[data-id="${updated.id}"]`);
+  if (!oldEl) return;
+  let newEl;
+  if (state.historyViewMode === 'grid') {
+    newEl = createHistoryGridCardEl(updated);
+  } else if (state.historyViewMode === 'compact') {
+    newEl = createHistoryCompactRowEl(updated);
+  } else {
+    newEl = createHistoryEntryEl(updated);
+  }
+  oldEl.replaceWith(newEl);
 });
 
 let isFirstFocus = true;
@@ -3034,7 +3523,7 @@ function getEffectivePath() {
 
 function updatePathDisplay() {
   const effective = getEffectivePath();
-  pathDisplay.innerHTML = '<span class="path-display__label">save to:</span> ' + escapeHtml(truncatePath(effective));
+  pathDisplay.innerHTML = `<span class="path-display__label">${icon('folder-02', 'ui-icon ui-icon--xs')}save to:</span> ${escapeHtml(truncatePath(effective))}`;
   pathDisplay.title = effective;
 }
 
@@ -3143,6 +3632,7 @@ function renderProjectList(filter) {
     row.style.setProperty('--proj-light-text', c.lightText);
     const count = counts[name] || 0;
     row.innerHTML = `
+      <span class="project-dropdown__item-dot" style="background:${c.bright}"></span>
       <span class="project-dropdown__item-name">${escapeHtml(name)}</span>
       <span class="project-dropdown__item-count">${count}</span>
       <span class="project-dropdown__item-delete" title="Delete project">${icon('cancel-01', 'ui-icon ui-icon--sm')}</span>
@@ -3157,9 +3647,16 @@ function renderProjectList(filter) {
       }
       closeProjectDropdown();
     });
-    row.querySelector('.project-dropdown__item-delete').addEventListener('click', (e) => {
+    row.querySelector('.project-dropdown__item-delete').addEventListener('click', async (e) => {
       e.stopPropagation();
-      deleteProject(name);
+      const confirmed = await showConfirmDialog({
+        title: 'Kill This Project?',
+        subtitle: `"${name}" · All history entries lose this tag.`,
+        confirmLabel: 'Delete It',
+        confirmSub: `Can't undo this, fam.`,
+        cancelLabel: 'Keep It',
+      });
+      if (confirmed) deleteProject(name);
     });
     projectList.appendChild(row);
   }
@@ -3274,20 +3771,19 @@ if (instantDownloadToggle) {
     instantDownloadToggle.classList.toggle('active', state.instantDownload);
     window.api.setSetting('instantDownload', state.instantDownload);
     updateDownloadBtnLabel();
+    updateTimeTooltips();
 
     if (state.instantDownload) {
+      relocateDownloadBtn('url-row');
       showStatusFromPool('success', 'instantOnToast');
     } else {
+      relocateDownloadBtn('url-row');
       showStatusFromPool('info', 'instantOffToast');
     }
 
-    // Re-run URL handling so the hint and button state reflect the new mode.
-    // If a URL is already in the input: instant ON → skip scan and enable button;
-    // instant OFF → clear videoInfo and re-trigger scan.
     const currentUrl = urlInput.value.trim();
     if (currentUrl) {
       if (!state.instantDownload) {
-        // Turning off: clear cached video info so it re-scans
         state.videoInfo = null;
         videoCard.className = 'video-card';
         hideCarousel();
@@ -3300,12 +3796,18 @@ if (instantDownloadToggle) {
 }
 
 modeToggle.addEventListener('click', (e) => {
+  const btn = e.target.closest('.mode-switcher__btn');
+  if (!btn) return;
   e.stopPropagation();
-  state.mode = state.mode === 'unhinged' ? 'professional' : 'unhinged';
-  modeToggle.classList.toggle('active', state.mode === 'professional');
+  const prev = state.mode;
+  state.mode = btn.dataset.mode;
+  if (state.mode === prev) return;
+  updateModeSwitcher();
   window.api.setSetting('mode', state.mode);
   applyMode();
-  if (state.mode === 'unhinged') {
+  if (state.mode === 'diabolical') {
+    showStatus('warning', copyFromPool('modeDiabolicalToast'), 'skull');
+  } else if (state.mode === 'unhinged') {
     showStatusFromPool('success', 'modeUnhingedToast');
   } else {
     showStatusFromPool('success', 'modeProfessionalToast');
@@ -3414,6 +3916,7 @@ async function openHistory() {
   closeSettings();
   closeQueue();
   closeProjectDropdown();
+  document.querySelector('.app').classList.add('blurred');
   historyView.classList.add('visible');
   syncHistoryViewBtns();
   requestAnimationFrame(() => updateHistoryFilterPill(false));
@@ -3428,10 +3931,12 @@ function syncHistoryViewBtns() {
 
 function closeHistory() {
   state.historyOpen = false;
+  document.querySelector('.app').classList.remove('blurred');
   historyView.classList.remove('visible');
   historySearch.value = '';
   state.historySearchTerm = '';
   state.historyProjectFilter = null;
+  closeProjectReassignPopover();
 }
 
 async function loadHistory() {
@@ -3468,9 +3973,25 @@ function getFilteredHistory() {
   }
 
   entries.sort((a, b) => {
-    const da = new Date(a.downloadedAt);
-    const db = new Date(b.downloadedAt);
-    return state.historySortNewest ? db - da : da - db;
+    switch (state.historySort) {
+      case 'oldest':
+        return new Date(a.downloadedAt) - new Date(b.downloadedAt);
+      case 'title-az':
+        return (a.title || '').localeCompare(b.title || '');
+      case 'title-za':
+        return (b.title || '').localeCompare(a.title || '');
+      case 'size-largest':
+        return (b.fileSize || 0) - (a.fileSize || 0);
+      case 'size-smallest':
+        return (a.fileSize || 0) - (b.fileSize || 0);
+      case 'duration-longest':
+        return (b.duration || 0) - (a.duration || 0);
+      case 'duration-shortest':
+        return (a.duration || 0) - (b.duration || 0);
+      case 'newest':
+      default:
+        return new Date(b.downloadedAt) - new Date(a.downloadedAt);
+    }
   });
 
   return entries;
@@ -3629,7 +4150,161 @@ function updateExportBtnLabel() {
   historyExportBtn.innerHTML = `${icon('download-04', 'ui-icon ui-icon--action')}${label}`;
 }
 
+// ============================================================
+// History — Project Reassign Popover
+// ============================================================
+
+let _reassignEntry = null;
+
+function openProjectReassignPopover(entry, anchorEl) {
+  _reassignEntry = entry;
+
+  const projects = state.projects || [];
+
+  let html = '';
+
+  if (entry.project) {
+    html += `<button class="history-reassign-popover__remove" data-action="remove">
+      <i class="hgi-stroke hgi-cancel-01 ui-icon"></i>
+      Remove Project
+    </button>`;
+    if (projects.length > 0) {
+      html += `<div class="history-reassign-popover__divider"></div>`;
+    }
+  }
+
+  if (projects.length === 0) {
+    html += `<div class="history-reassign-popover__empty">No projects yet, fam.</div>`;
+  } else {
+    for (const name of projects) {
+      const c = projectColors(name);
+      const isActive = entry.project === name;
+      html += `<button
+        class="history-reassign-popover__item${isActive ? ' active' : ''}"
+        data-project="${escapeHtml(name)}"
+        style="--proj-bright:${c.bright};--proj-dark:${c.dark};--proj-hover:${c.hover};--proj-light-bg:${c.lightBg};--proj-light-text:${c.lightText}"
+      >
+        <span class="history-reassign-popover__dot" style="background:${c.bright}"></span>
+        ${escapeHtml(name)}
+      </button>`;
+    }
+  }
+
+  html += `<div class="history-reassign-popover__divider"></div>
+  <button class="history-reassign-popover__new-btn" data-action="new-project">
+    ${icon('add-01', 'ui-icon')}
+    New Project
+  </button>`;
+
+  historyReassignPopover.innerHTML = html;
+
+  const rect = anchorEl.getBoundingClientRect();
+  const popoverWidth = 200;
+  const margin = 6;
+
+  let left = rect.left;
+  let top = rect.bottom + margin;
+
+  if (left + popoverWidth > window.innerWidth - 8) {
+    left = rect.right - popoverWidth;
+  }
+  if (left < 8) left = 8;
+
+  historyReassignPopover.style.top = `${top}px`;
+  historyReassignPopover.style.left = `${left}px`;
+  historyReassignPopover.removeAttribute('aria-hidden');
+
+  requestAnimationFrame(() => {
+    // Flip above anchor if popover clips below viewport
+    const popRect = historyReassignPopover.getBoundingClientRect();
+    if (popRect.bottom > window.innerHeight - 8) {
+      historyReassignPopover.style.top = `${rect.top - popRect.height - margin}px`;
+    }
+    historyReassignPopover.classList.add('visible');
+  });
+}
+
+function closeProjectReassignPopover() {
+  historyReassignPopover.classList.remove('visible');
+  historyReassignPopover.setAttribute('aria-hidden', 'true');
+  _reassignEntry = null;
+}
+
+function showReassignNewProjectInput() {
+  const newBtn = historyReassignPopover.querySelector('[data-action="new-project"]');
+  if (!newBtn) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'history-reassign-popover__new-wrap';
+  wrap.innerHTML = `<input
+    class="history-reassign-popover__new-input"
+    placeholder="Project name, fam"
+    maxlength="50"
+    autocomplete="off"
+    spellcheck="false"
+  >`;
+  newBtn.replaceWith(wrap);
+
+  const input = wrap.querySelector('input');
+  input.focus();
+
+  input.addEventListener('click', (e) => e.stopPropagation());
+  wrap.addEventListener('click', (e) => e.stopPropagation());
+
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) return;
+      await createAndAssignProject(name);
+    }
+    if (e.key === 'Escape') {
+      closeProjectReassignPopover();
+    }
+  });
+}
+
+async function createAndAssignProject(name) {
+  const entry = _reassignEntry;
+  if (!entry) return;
+
+  const result = await window.api.createProject(name);
+  if (!result) return;
+
+  if (!state.projects.includes(result.name)) {
+    state.projects = [result.name, ...state.projects];
+  }
+  state.projectHues = result.projectHues;
+
+  closeProjectReassignPopover();
+
+  const updated = await window.api.updateHistoryEntryProject(entry.id, result.name);
+  if (!updated) return;
+
+  const idx = state.historyData.findIndex(h => h.id === entry.id);
+  if (idx !== -1) state.historyData[idx] = updated;
+
+  const modalEl = historyView.querySelector(`.history-detail-modal-panel [data-id="${entry.id}"]`);
+  if (modalEl) {
+    const newModalEl = createHistoryEntryEl(updated);
+    newModalEl.classList.add('expanded');
+    const detail = newModalEl.querySelector('.history-entry__detail');
+    const detailInner = newModalEl.querySelector('.history-entry__detail-inner');
+    if (detail) detail.style.height = 'auto';
+    if (detailInner) detailInner.style.opacity = '1';
+    modalEl.replaceWith(newModalEl);
+  }
+
+  renderHistoryList();
+}
+
+// Incremented every time renderHistoryList is called so in-flight idle batches
+// from a previous render abort themselves immediately.
+let _historyRenderGeneration = 0;
+
 function renderHistoryList() {
+  const generation = ++_historyRenderGeneration;
+
   const entries = getFilteredHistory();
   historyList.innerHTML = '';
   collapseActiveCard = null;
@@ -3644,23 +4319,60 @@ function renderHistoryList() {
   if (count === 0) {
     historyEmpty.classList.add('visible');
     historyList.style.display = 'none';
+    historySortRow.style.display = 'none';
     return;
   }
 
   historyEmpty.classList.remove('visible');
   historyList.style.display = '';
+  historySortRow.style.display = '';
 
   historyList.classList.remove('history-list--list', 'history-list--grid', 'history-list--compact');
   historyList.classList.add(`history-list--${state.historyViewMode}`);
 
-  for (const entry of entries) {
-    if (state.historyViewMode === 'grid') {
-      historyList.appendChild(createHistoryGridCardEl(entry));
-    } else if (state.historyViewMode === 'compact') {
-      historyList.appendChild(createHistoryCompactRowEl(entry));
-    } else {
-      historyList.appendChild(createHistoryEntryEl(entry));
+  const BATCH = 50;
+  const viewMode = state.historyViewMode;
+
+  function buildCard(entry) {
+    if (viewMode === 'grid') return createHistoryGridCardEl(entry);
+    if (viewMode === 'compact') return createHistoryCompactRowEl(entry);
+    return createHistoryEntryEl(entry);
+  }
+
+  // Render the first batch synchronously so the panel feels instant.
+  const firstBatch = entries.slice(0, BATCH);
+  const frag = document.createDocumentFragment();
+  for (const entry of firstBatch) frag.appendChild(buildCard(entry));
+  historyList.appendChild(frag);
+
+  if (entries.length <= BATCH) return;
+
+  // Schedule remaining batches during idle time.
+  let offset = BATCH;
+  const scheduleNext = () => {
+    if (generation !== _historyRenderGeneration) return; // stale render, abort
+    if (offset >= entries.length) return;
+
+    const batch = entries.slice(offset, offset + BATCH);
+    offset += BATCH;
+
+    const batchFrag = document.createDocumentFragment();
+    for (const entry of batch) batchFrag.appendChild(buildCard(entry));
+    historyList.appendChild(batchFrag);
+
+    if (offset < entries.length) {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(scheduleNext, { timeout: 500 });
+      } else {
+        setTimeout(scheduleNext, 0);
+      }
     }
+  };
+
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(scheduleNext, { timeout: 500 });
+  } else {
+    setTimeout(scheduleNext, 0);
   }
 }
 
@@ -3677,7 +4389,11 @@ function updateHistoryProjectFilter() {
   historyProjectFilter.style.display = '';
 
   const projectFilterLabel = state.historyProjectFilter || 'All Projects';
+  const filterDot = state.historyProjectFilter
+    ? `<span class="history-project-filter-btn__dot" style="background:${projectColors(state.historyProjectFilter).bright}"></span>`
+    : '';
   historyProjectBtn.innerHTML = `
+    ${filterDot}
     <span class="history-project-filter-btn__label">${escapeHtml(projectFilterLabel)}</span>
     ${icon('arrow-down-01', 'ui-icon history-project-filter-btn__icon')}
   `;
@@ -3718,9 +4434,28 @@ function updateHistoryProjectFilter() {
     item.style.setProperty('--proj-hover', c.hover);
     item.style.setProperty('--proj-light-bg', c.lightBg);
     item.style.setProperty('--proj-light-text', c.lightText);
-    item.textContent = name;
-    item.addEventListener('click', (e) => {
+    item.innerHTML = `
+      <span class="history-project-menu__dot" style="background:${c.bright}"></span>
+      <span class="history-project-menu__name">${escapeHtml(name)}</span>
+      <span class="history-project-menu__delete" title="Delete project">${icon('cancel-01', 'ui-icon ui-icon--sm')}</span>
+    `;
+    item.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (e.target.closest('.history-project-menu__delete')) {
+        const confirmed = await showConfirmDialog({
+          title: 'Kill This Project?',
+          subtitle: `"${name}" · All history entries lose this tag.`,
+          confirmLabel: 'Delete It',
+          confirmSub: `Can't undo this, fam.`,
+          cancelLabel: 'Keep It',
+        });
+        if (!confirmed) return;
+        if (state.historyProjectFilter === name) state.historyProjectFilter = null;
+        historyProjectMenu.classList.remove('visible');
+        await deleteProject(name);
+        renderHistoryList();
+        return;
+      }
       state.historyProjectFilter = name;
       historyProjectMenu.classList.remove('visible');
       renderHistoryList();
@@ -3742,6 +4477,134 @@ document.addEventListener('click', (e) => {
 
 // Tracks the collapse function of the currently open card so only one is open at a time
 let collapseActiveCard = null;
+
+// ---- History delete dialog ----
+
+function showHistoryDeleteDialog(entry) {
+  return new Promise((resolve) => {
+    const hasFile = !!(entry.filePath || (entry.mediaType === 'carousel' && entry.carouselItems?.some(i => i.filePath)));
+    const titleText = entry.title ? midTruncate(entry.title, 60) : 'this entry';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'delete-dialog-overlay';
+
+    overlay.innerHTML = `
+      <div class="delete-dialog" role="dialog" aria-modal="true">
+        <div class="delete-dialog__title">What Are We Killing?</div>
+        <div class="delete-dialog__subtitle">${escapeHtml(titleText)}</div>
+        <div class="delete-dialog__actions">
+          <button class="delete-dialog__btn delete-dialog__btn--safe" data-choice="app-only">
+            <span class="delete-dialog__btn-label">This App Only</span>
+            <span class="delete-dialog__btn-sub">File stays on your device.</span>
+          </button>
+          ${hasFile ? `
+          <button class="delete-dialog__btn delete-dialog__btn--danger" data-choice="with-file">
+            <span class="delete-dialog__btn-label">Nuke from Device</span>
+            <span class="delete-dialog__btn-sub">Gone forever. No backup, fam.</span>
+          </button>` : ''}
+        </div>
+        <button class="delete-dialog__cancel" data-choice="cancel">Keep it</button>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    function close(choice) {
+      overlay.classList.remove('visible');
+      overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+      resolve(choice);
+    }
+
+    overlay.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-choice]');
+      if (btn) { close(btn.dataset.choice); return; }
+      if (!e.target.closest('.delete-dialog')) close('cancel');
+    });
+
+    const onKey = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); close('cancel'); } };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('transitionend', () => document.removeEventListener('keydown', onKey), { once: true });
+  });
+}
+
+function showConfirmDialog({ title, subtitle, confirmLabel, confirmSub, cancelLabel = 'Keep it' }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'delete-dialog-overlay';
+
+    overlay.innerHTML = `
+      <div class="delete-dialog" role="dialog" aria-modal="true">
+        <div class="delete-dialog__title">${escapeHtml(title)}</div>
+        ${subtitle ? `<div class="delete-dialog__subtitle">${escapeHtml(subtitle)}</div>` : ''}
+        <div class="delete-dialog__actions">
+          <button class="delete-dialog__btn delete-dialog__btn--danger" data-choice="confirm">
+            <span class="delete-dialog__btn-label">${escapeHtml(confirmLabel)}</span>
+            ${confirmSub ? `<span class="delete-dialog__btn-sub">${escapeHtml(confirmSub)}</span>` : ''}
+          </button>
+        </div>
+        <button class="delete-dialog__cancel" data-choice="cancel">${escapeHtml(cancelLabel)}</button>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    function close(confirmed) {
+      overlay.classList.remove('visible');
+      overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+      resolve(confirmed);
+    }
+
+    overlay.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-choice]');
+      if (btn) { close(btn.dataset.choice === 'confirm'); return; }
+      if (!e.target.closest('.delete-dialog')) close(false);
+    });
+
+    const onKey = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); close(false); } };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('transitionend', () => document.removeEventListener('keydown', onKey), { once: true });
+  });
+}
+
+async function handleHistoryDelete(entry, closeFn) {
+  const choice = await showHistoryDeleteDialog(entry);
+
+  if (choice === 'cancel') {
+    return;
+  }
+
+  const deleteFile = choice === 'with-file';
+  const result = await window.api.deleteHistoryEntry(entry.id, deleteFile);
+
+  if (result?.errors?.length) {
+    showStatus('error', `Couldn't delete ${result.errors.length} file${result.errors.length > 1 ? 's' : ''} from device. Removed from Downroad anyway.`);
+  }
+
+  state.historyData = state.historyData.filter(h => h.id !== entry.id);
+  renderHistoryList();
+
+  if (typeof closeFn === 'function') closeFn();
+}
+
+function getHistorySortBadgeHtml(entry, viewMode) {
+  const sort = state.historySort;
+  const isImage = entry.mediaType === 'image' || entry.mediaType === 'carousel';
+  if (sort === 'size-largest' || sort === 'size-smallest') {
+    if (!entry.fileSize) return '';
+    return `<span class="history-entry__sort-badge">${escapeHtml(formatFileSize(entry.fileSize))}</span>`;
+  }
+  if ((sort === 'duration-longest' || sort === 'duration-shortest') && viewMode === 'compact' && !isImage) {
+    const d = formatDuration(entry.duration);
+    if (!d || d === '0:00') return '';
+    return `<span class="history-entry__sort-badge">${escapeHtml(d)}</span>`;
+  }
+  if ((sort === 'newest' || sort === 'oldest') && viewMode === 'grid') {
+    return `<span class="history-entry__sort-badge">${escapeHtml(formatRelativeDate(entry.downloadedAt))}</span>`;
+  }
+  return '';
+}
 
 function createHistoryEntryEl(entry) {
   const el = document.createElement('div');
@@ -3774,7 +4637,8 @@ function createHistoryEntryEl(entry) {
     if (vidCount > 0) parts.push(`${vidCount} video${vidCount > 1 ? 's' : ''}`);
     metaParts.push(parts.join(', '));
   } else if (!isImage) {
-    metaParts.push(formatDuration(entry.duration) + clipInfo);
+    const dur = formatDuration(entry.duration);
+    if (dur && dur !== '0:00') metaParts.push(dur + clipInfo);
   }
   const filteredMeta = metaParts.filter(Boolean);
 
@@ -3858,12 +4722,16 @@ function createHistoryEntryEl(entry) {
   el.innerHTML = `
     <div class="history-entry__header">
       <div class="history-entry__info">
-        <div class="history-entry__title">${escapeHtml(entry.title)}</div>
+        <div class="history-entry__title">${escapeHtml(midTruncate(entry.title, 65))}</div>
         <div class="history-entry__meta">${escapeHtml(filteredMeta.join(' · '))}</div>
       </div>
       ${qualityBadge}
+      ${getHistorySortBadgeHtml(entry, 'list')}
       ${entry.platform && entry.platform !== 'youtube' ? `<span class="history-entry__platform">${escapeHtml(entry.platform)}</span>` : ''}
-      ${entry.project ? `<span class="history-entry__project">${escapeHtml(entry.project)}</span>` : ''}
+      ${entry.project
+        ? `<span class="history-entry__project" data-reassign-trigger title="Change project">${escapeHtml(entry.project)}</span>`
+        : `<button class="history-entry__add-project" data-reassign-trigger title="Assign to project">${icon('add-01', 'ui-icon')} Project</button>`
+      }
       <span class="history-entry__date">${escapeHtml(formatRelativeDate(entry.downloadedAt))}</span>
       <span class="history-entry__chevron">
         ${icon('arrow-right-01', 'ui-icon')}
@@ -3876,9 +4744,9 @@ function createHistoryEntryEl(entry) {
         <div class="history-entry__actions">
           ${entry.webpageUrl ? '<button class="history-action-btn history-action-btn--redownload" data-action="redownload">Download Again</button>' : ''}
           <button class="history-action-btn history-action-btn--copyinfo" data-action="copyinfo">Copy Info</button>
-          <button class="history-action-btn history-action-btn--copy" data-action="copy">Copy URL</button>
+          ${entry.filePath && !isCarousel ? `<button class="history-action-btn history-action-btn--reveal" data-action="reveal">${icon('folder-01', 'ui-icon ui-icon--action')}Show in Finder</button>` : ''}
           <button class="history-action-btn history-action-btn--open" data-action="open">${icon('internet', 'ui-icon ui-icon--action')}Open Original</button>
-          <button class="history-action-btn history-action-btn--delete" data-action="delete">Remove</button>
+          <button class="history-action-btn history-action-btn--delete" data-action="delete">${icon('delete-02', 'ui-icon ui-icon--xs')} Delete</button>
         </div>
       </div>
     </div>
@@ -3915,7 +4783,8 @@ function createHistoryEntryEl(entry) {
     }).catch(() => {});
   }
 
-  header.addEventListener('click', () => {
+  header.addEventListener('click', (e) => {
+    if (e.target.closest('[data-reassign-trigger]')) return;
     if (expandAnim) { expandAnim.cancel(); expandAnim = null; }
 
     if (el.classList.contains('expanded')) {
@@ -4022,19 +4891,6 @@ function createHistoryEntryEl(entry) {
     } catch { /* clipboard access denied */ }
   });
 
-  el.querySelector('[data-action="copy"]').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (entry.webpageUrl) {
-      try {
-        await navigator.clipboard.writeText(entry.webpageUrl);
-        const btn = e.currentTarget;
-        btn.textContent = t('Copied!');
-        btn.classList.add('pop');
-        btn.addEventListener('animationend', () => btn.classList.remove('pop'), { once: true });
-        setTimeout(() => { btn.textContent = t('Copy URL'); }, 1500);
-      } catch { /* clipboard access denied */ }
-    }
-  });
 
   const redownloadBtn = el.querySelector('[data-action="redownload"]');
   if (redownloadBtn) {
@@ -4052,12 +4908,25 @@ function createHistoryEntryEl(entry) {
     if (entry.webpageUrl) window.api.openExternal(entry.webpageUrl);
   });
 
-  el.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+  const revealBtn = el.querySelector('[data-action="reveal"]');
+  if (revealBtn) {
+    revealBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const result = await window.api.revealInFinder(entry.filePath);
+      if (!result.found) {
+        showStatus('warning', t('File was moved or deleted. Opened the download folder instead.'));
+      }
+    });
+  }
+
+  const delBtn = el.querySelector('[data-action="delete"]');
+  delBtn._historyDeleteHandler = (e) => {
     e.stopPropagation();
-    await window.api.deleteHistoryEntry(entry.id);
-    state.historyData = state.historyData.filter(h => h.id !== entry.id);
-    renderHistoryList();
-  });
+    handleHistoryDelete(entry);
+  };
+  delBtn.addEventListener('click', delBtn._historyDeleteHandler);
+
+  attachReassignTrigger(el, entry);
 
   return el;
 }
@@ -4077,6 +4946,16 @@ function createThumbEl(entry, cssClass) {
   wrapper.className = cssClass;
   const isAudio = entry.quality === 'audio' || entry.mediaType === 'audio';
   const fallbackIconName = isAudio ? 'music-note-01' : 'image-not-found-01';
+  const isCarouselGrid = entry.mediaType === 'carousel' && entry.carouselItems?.length > 0 && cssClass === 'history-grid-card__thumb';
+
+  function appendCarouselBadge() {
+    if (!isCarouselGrid) return;
+    const badge = document.createElement('span');
+    badge.className = 'history-thumb__carousel-badge';
+    badge.innerHTML = `${icon('copy-01', 'ui-icon')} ${entry.carouselItems.length}`;
+    wrapper.appendChild(badge);
+  }
+
   const thumbUrl = resolveThumbUrl(entry);
   if (thumbUrl) {
     const img = document.createElement('img');
@@ -4086,12 +4965,14 @@ function createThumbEl(entry, cssClass) {
     img.addEventListener('error', () => {
       wrapper.innerHTML = icon(fallbackIconName, 'ui-icon history-thumb__icon');
       wrapper.classList.add('history-thumb--placeholder');
+      appendCarouselBadge();
     });
     wrapper.appendChild(img);
   } else {
     wrapper.innerHTML = icon(fallbackIconName, 'ui-icon history-thumb__icon');
     wrapper.classList.add('history-thumb--placeholder');
   }
+  appendCarouselBadge();
   return wrapper;
 }
 
@@ -4145,7 +5026,14 @@ function openHistoryDetailModal(entry) {
   });
 
   const deleteBtn = entryEl.querySelector('[data-action="delete"]');
-  if (deleteBtn) deleteBtn.addEventListener('click', () => setTimeout(closeModal, 50), { once: true });
+  if (deleteBtn) {
+    deleteBtn.removeEventListener('click', deleteBtn._historyDeleteHandler);
+    deleteBtn._historyDeleteHandler = (e) => {
+      e.stopPropagation();
+      handleHistoryDelete(entry, closeModal);
+    };
+    deleteBtn.addEventListener('click', deleteBtn._historyDeleteHandler);
+  }
 
   const redownloadBtn = entryEl.querySelector('[data-action="redownload"]');
   if (redownloadBtn) redownloadBtn.addEventListener('click', closeModal, { once: true });
@@ -4170,7 +5058,8 @@ function createHistoryGridCardEl(entry) {
   const isCarousel = entry.mediaType === 'carousel' && entry.carouselItems?.length > 0;
   const isImage = entry.mediaType === 'image' || isCarousel;
   const uploaderText = entry.uploader || entry.channel || '';
-  const durationText = !isImage ? formatDuration(entry.duration) : '';
+  const durationRaw = !isImage ? formatDuration(entry.duration) : '';
+  const durationText = durationRaw && durationRaw !== '0:00' ? durationRaw : '';
   const metaText = [uploaderText, durationText].filter(Boolean).join(' · ');
   const qualityText = isCarousel
     ? `${entry.carouselItems.length} items`
@@ -4180,13 +5069,54 @@ function createHistoryGridCardEl(entry) {
 
   el.innerHTML = `
     <div class="history-grid-card__body">
-      <div class="history-grid-card__title">${escapeHtml(entry.title)}</div>
+      <div class="history-grid-card__title">${escapeHtml(midTruncate(entry.title, 65))}</div>
       <div class="history-grid-card__meta">${escapeHtml(metaText)}</div>
-      <span class="history-grid-card__quality">${escapeHtml(qualityText)}</span>
+      <div class="history-grid-card__footer">
+        ${entry.project
+          ? `<span class="history-entry__project history-grid-card__project" data-reassign-trigger title="Change project">${escapeHtml(entry.project)}</span>`
+          : `<button class="history-entry__add-project history-grid-card__project" data-reassign-trigger title="Assign to project">${icon('add-01', 'ui-icon')} Project</button>`
+        }
+        <span class="history-grid-card__quality">${escapeHtml(qualityText)}</span>
+      </div>
     </div>
   `;
+  const gridDeleteBtn = document.createElement('button');
+  gridDeleteBtn.className = 'history-grid-card__delete';
+  gridDeleteBtn.dataset.action = 'delete';
+  gridDeleteBtn.title = 'Delete';
+  gridDeleteBtn.setAttribute('aria-label', 'Delete');
+  gridDeleteBtn.innerHTML = icon('delete-02', 'ui-icon');
+  el.appendChild(gridDeleteBtn);
+
   el.insertBefore(thumb, el.firstChild);
-  el.addEventListener('click', () => openHistoryDetailModal(entry));
+
+  // Sort-contextual overlay on thumbnail (top-left corner)
+  const sortBadgeHtml = getHistorySortBadgeHtml(entry, 'grid');
+  if (sortBadgeHtml) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = sortBadgeHtml;
+    const badgeText = tmp.firstChild?.textContent || '';
+    if (badgeText) {
+      const overlay = document.createElement('span');
+      overlay.className = 'history-grid-card__sort-overlay';
+      overlay.textContent = badgeText;
+      el.querySelector('.history-grid-card__thumb').appendChild(overlay);
+    }
+  }
+
+  attachReassignTrigger(el, entry);
+
+  gridDeleteBtn._historyDeleteHandler = (e) => {
+    e.stopPropagation();
+    handleHistoryDelete(entry);
+  };
+  gridDeleteBtn.addEventListener('click', gridDeleteBtn._historyDeleteHandler);
+
+  el.addEventListener('click', (e) => {
+    if (e.target.closest('[data-reassign-trigger]')) return;
+    if (e.target.closest('[data-action="delete"]')) return;
+    openHistoryDetailModal(entry);
+  });
   return el;
 }
 
@@ -4216,21 +5146,39 @@ function createHistoryCompactRowEl(entry) {
 
   el.innerHTML = `
     <div class="history-compact-row__info">
-      <div class="history-compact-row__title">${escapeHtml(entry.title)}</div>
+      <div class="history-compact-row__title">${escapeHtml(midTruncate(entry.title, 50))}</div>
       ${uploaderText ? `<div class="history-compact-row__channel">${escapeHtml(uploaderText)}</div>` : ''}
     </div>
+    ${entry.project
+      ? `<span class="history-entry__project history-compact-row__project" data-reassign-trigger title="Change project">${escapeHtml(entry.project)}</span>`
+      : `<button class="history-entry__add-project history-compact-row__project" data-reassign-trigger title="Assign to project">${icon('add-01', 'ui-icon')} Project</button>`
+    }
     <span class="history-compact-row__quality">${escapeHtml(qualityText)}</span>
+    ${getHistorySortBadgeHtml(entry, 'compact')}
     <span class="history-compact-row__date">${escapeHtml(formatRelativeDate(entry.downloadedAt))}</span>
+    <button class="history-compact-row__delete" data-action="delete" title="Delete" aria-label="Delete">${icon('delete-02', 'ui-icon')}</button>
   `;
   el.insertBefore(thumb, el.firstChild);
-  el.addEventListener('click', () => openHistoryDetailModal(entry));
+  attachReassignTrigger(el, entry);
+
+  const compactDeleteBtn = el.querySelector('[data-action="delete"]');
+  compactDeleteBtn._historyDeleteHandler = (e) => {
+    e.stopPropagation();
+    handleHistoryDelete(entry);
+  };
+  compactDeleteBtn.addEventListener('click', compactDeleteBtn._historyDeleteHandler);
+
+  el.addEventListener('click', (e) => {
+    if (e.target.closest('[data-reassign-trigger]')) return;
+    if (e.target.closest('[data-action="delete"]')) return;
+    openHistoryDetailModal(entry);
+  });
   return el;
 }
 
+const _escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
+  return String(str == null ? '' : str).replace(/[&<>"']/g, c => _escapeMap[c]);
 }
 
 let historySearchDebounce = null;
@@ -4251,11 +5199,105 @@ historyBack.addEventListener('click', () => {
   closeHistory();
 });
 
+// Shared helper — called by direct pill listeners on all card types
+function handleReassignTriggerClick(e, entry) {
+  e.stopPropagation();
+  if (historyReassignPopover.classList.contains('visible') && _reassignEntry?.id === entry.id) {
+    closeProjectReassignPopover();
+    return;
+  }
+  openProjectReassignPopover(entry, e.currentTarget);
+}
+
+// Wire up the reassign trigger on any card element after its innerHTML is set
+function attachReassignTrigger(el, entry) {
+  const trigger = el.querySelector('[data-reassign-trigger]');
+  if (!trigger) return;
+  trigger.addEventListener('click', (e) => handleReassignTriggerClick(e, entry));
+}
+
+// Reassign popover — handle selection
+historyReassignPopover.addEventListener('click', async (e) => {
+  if (e.target.closest('[data-action="new-project"]')) {
+    e.stopPropagation();
+    showReassignNewProjectInput();
+    return;
+  }
+
+  const removeBtn = e.target.closest('[data-action="remove"]');
+  const projectBtn = e.target.closest('[data-project]');
+  if (!removeBtn && !projectBtn) return;
+
+  const entry = _reassignEntry;
+  if (!entry) return;
+
+  const newProject = removeBtn ? null : projectBtn.dataset.project;
+  closeProjectReassignPopover();
+
+  const updated = await window.api.updateHistoryEntryProject(entry.id, newProject);
+  if (!updated) return;
+
+  const idx = state.historyData.findIndex(h => h.id === entry.id);
+  if (idx !== -1) state.historyData[idx] = updated;
+
+  // Refresh the detail modal if it's open for this entry
+  const modalEl = historyView.querySelector(`.history-detail-modal-panel [data-id="${entry.id}"]`);
+  if (modalEl) {
+    const newModalEl = createHistoryEntryEl(updated);
+    newModalEl.classList.add('expanded');
+    const detail = newModalEl.querySelector('.history-entry__detail');
+    const detailInner = newModalEl.querySelector('.history-entry__detail-inner');
+    detail.style.height = 'auto';
+    detailInner.style.opacity = '1';
+    // Re-attach the modal-close listeners for delete / redownload
+    const deleteBtn = newModalEl.querySelector('[data-action="delete"]');
+    if (deleteBtn && _closeDetailModal) deleteBtn.addEventListener('click', () => setTimeout(_closeDetailModal, 50), { once: true });
+    const redownloadBtn = newModalEl.querySelector('[data-action="redownload"]');
+    if (redownloadBtn && _closeDetailModal) redownloadBtn.addEventListener('click', _closeDetailModal, { once: true });
+    modalEl.replaceWith(newModalEl);
+  }
+
+  // If a filter is active and the updated entry no longer belongs in it, full re-render
+  // so the card disappears (or the empty state shows if that was the last one)
+  if (state.historyProjectFilter && updated.project !== state.historyProjectFilter) {
+    renderHistoryList();
+    return;
+  }
+
+  // Replace just the one card in the main list — works for all three view modes
+  const oldEl = historyList.querySelector(`[data-id="${entry.id}"]`);
+  if (oldEl) {
+    let newEl;
+    if (state.historyViewMode === 'grid') {
+      newEl = createHistoryGridCardEl(updated);
+    } else if (state.historyViewMode === 'compact') {
+      newEl = createHistoryCompactRowEl(updated);
+    } else {
+      newEl = createHistoryEntryEl(updated);
+    }
+    oldEl.replaceWith(newEl);
+  }
+
+  updateHistoryProjectFilter();
+});
+
+// Reassign popover — close on outside click
+document.addEventListener('click', (e) => {
+  if (!historyReassignPopover.classList.contains('visible')) return;
+  if (historyReassignPopover.contains(e.target)) return;
+  if (e.target.closest('[data-reassign-trigger]')) return;
+  closeProjectReassignPopover();
+});
+
 historyExportBtn.addEventListener('click', () => {
   exportHistory();
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && historyReassignPopover.classList.contains('visible')) {
+    closeProjectReassignPopover();
+    return;
+  }
   if (e.key === 'Escape' && state.projectDropdownOpen) {
     closeProjectDropdown();
     return;
@@ -4276,43 +5318,101 @@ document.addEventListener('keydown', (e) => {
 
 historyClearBtn.addEventListener('click', async () => {
   if (state.historyData.length === 0) return;
-  if (historyClearBtn.classList.contains('confirm')) return;
   const count = state.historyData.length;
-  historyClearBtn.textContent = tp('nukeEntries', count) || `Nuke these ${count} worthless entries, bitch?`;
-  historyClearBtn.classList.add('confirm');
-
-  const onConfirm = async () => {
-    historyClearBtn.removeEventListener('click', onConfirm);
-    await window.api.clearHistory();
-    state.historyData = [];
-    renderHistoryList();
-    historyClearBtn.textContent = t('Clear All, champ');
-    historyClearBtn.classList.remove('confirm');
-  };
-
-  const onCancel = () => {
-    historyClearBtn.textContent = t('Clear All, champ');
-    historyClearBtn.classList.remove('confirm');
-    historyClearBtn.removeEventListener('click', onConfirm);
-    document.removeEventListener('click', onOutside);
-  };
-
-  const onOutside = (e) => {
-    if (!historyClearBtn.contains(e.target)) {
-      onCancel();
-    }
-  };
-
-  setTimeout(() => {
-    historyClearBtn.addEventListener('click', onConfirm, { once: true });
-    document.addEventListener('click', onOutside, { once: true });
-  }, 10);
+  const confirmed = await showConfirmDialog({
+    title: 'Nuke All History?',
+    subtitle: `${count} download${count !== 1 ? 's' : ''} gone. Files stay on your device.`,
+    confirmLabel: 'Nuke All',
+    confirmSub: 'This clears everything, bitch.',
+    cancelLabel: 'Keep it',
+  });
+  if (!confirmed) return;
+  await window.api.clearHistory();
+  state.historyData = [];
+  renderHistoryList();
 });
 
-historySortBtn.addEventListener('click', () => {
-  state.historySortNewest = !state.historySortNewest;
-  historySortBtn.textContent = state.historySortNewest ? t('Newest first') : t('Oldest first');
-  renderHistoryList();
+const historySortWrap = $('#historySortWrap');
+const historySortMenu = $('#historySortMenu');
+
+const SORT_OPTIONS = [
+  { key: 'newest',           label: 'Newest first',     icon: 'calendar-03' },
+  { key: 'oldest',           label: 'Oldest first',     icon: 'calendar-03' },
+  { key: 'title-az',         label: 'Title A-Z',        icon: 'sorting-a-z-01' },
+  { key: 'title-za',         label: 'Title Z-A',        icon: 'sorting-z-a-01' },
+  { key: 'size-largest',     label: 'Largest file',     icon: 'hard-drive' },
+  { key: 'size-smallest',    label: 'Smallest file',    icon: 'hard-drive' },
+  { key: 'duration-longest', label: 'Longest first',    icon: 'time-quarter-pass' },
+  { key: 'duration-shortest',label: 'Shortest first',   icon: 'time-quarter-pass' },
+];
+
+function syncHistorySortBtn() {
+  const opt = SORT_OPTIONS.find(o => o.key === state.historySort) || SORT_OPTIONS[0];
+  historySortBtn.querySelector('span').textContent = opt.label;
+  historySortBtn.classList.toggle('active', state.historySort !== 'newest');
+}
+
+let _sortMenuOpen = false;
+
+function openSortMenu() {
+  _sortMenuOpen = true;
+  historySortMenu.getAnimations().forEach(a => a.cancel());
+  historySortMenu.style.display = 'flex';
+  historySortMenu.animate(
+    [
+      { opacity: '0', transform: 'translateY(-10px) scale(0.94)' },
+      { opacity: '1', transform: 'translateY(0) scale(1)' },
+    ],
+    { duration: 300, easing: 'cubic-bezier(0.32, 1.05, 0.36, 1)', fill: 'forwards' }
+  );
+}
+
+function closeSortMenu() {
+  if (!_sortMenuOpen) return;
+  _sortMenuOpen = false;
+  historySortMenu.getAnimations().forEach(a => a.cancel());
+  const anim = historySortMenu.animate(
+    [
+      { opacity: '1', transform: 'translateY(0) scale(1)' },
+      { opacity: '0', transform: 'translateY(-6px) scale(0.95)' },
+    ],
+    { duration: 200, easing: 'cubic-bezier(0, 0, 0.2, 1)', fill: 'forwards' }
+  );
+  anim.onfinish = () => { historySortMenu.style.display = 'none'; };
+}
+
+function buildHistorySortMenu() {
+  historySortMenu.innerHTML = '';
+  for (const opt of SORT_OPTIONS) {
+    const item = document.createElement('button');
+    item.className = 'history-sort-menu__item';
+    if (state.historySort === opt.key) item.classList.add('active');
+    item.innerHTML = `
+      <i class="hgi-stroke hgi-${opt.icon} ui-icon ui-icon--xs" aria-hidden="true"></i>
+      ${escapeHtml(opt.label)}
+    `;
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.historySort = opt.key;
+      localStorage.setItem('historySort', opt.key);
+      syncHistorySortBtn();
+      closeSortMenu();
+      renderHistoryList();
+    });
+    historySortMenu.appendChild(item);
+  }
+}
+
+historySortBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  buildHistorySortMenu();
+  if (_sortMenuOpen) closeSortMenu(); else openSortMenu();
+});
+
+document.addEventListener('click', (e) => {
+  if (historySortWrap && !historySortWrap.contains(e.target)) {
+    closeSortMenu();
+  }
 });
 
 historyViewToggles.addEventListener('click', (e) => {
@@ -4367,10 +5467,11 @@ async function init() {
   autoPasteToggle.classList.toggle('active', state.autoPaste);
   showInFinderToggle.classList.toggle('active', state.showInFinder);
   if (instantDownloadToggle) instantDownloadToggle.classList.toggle('active', state.instantDownload);
-  modeToggle.classList.toggle('active', state.mode === 'professional');
-  applyTheme(state.theme);
+  updateModeSwitcher(false);
+  applyTheme(state.theme, false);
   applyMode();
   updateDownloadBtnLabel();
+  relocateDownloadBtn('url-row');
 
   // Set correct button active state on startup + show quality label + presets
   const qualityBtns = qualitySelector.querySelectorAll('.quality-option');

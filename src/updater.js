@@ -47,37 +47,71 @@ function githubGet(url, redirectCount = 0) {
   });
 }
 
+const DOWNLOAD_INACTIVITY_TIMEOUT_MS = 60_000;
+
 function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
     let redirects = 0;
+    let settled = false;
+    const done = (fn) => { if (!settled) { settled = true; fn(); } };
+
     const follow = (u) => {
       if (redirects >= MAX_REDIRECTS) {
-        reject(new Error('Too many redirects'));
+        done(() => reject(new Error('Too many redirects')));
         return;
       }
-      https.get(u, { headers: { 'User-Agent': 'YouTube-Clip-Downloader' } }, (res) => {
+      const req = https.get(u, {
+        headers: { 'User-Agent': 'YouTube-Clip-Downloader' },
+        timeout: DOWNLOAD_INACTIVITY_TIMEOUT_MS,
+      }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           redirects++;
           follow(res.headers.location);
           return;
         }
         if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode}`));
+          done(() => reject(new Error(`HTTP ${res.statusCode}`)));
           return;
         }
+
+        // Inactivity timeout on the response stream: if no data arrives for
+        // DOWNLOAD_INACTIVITY_TIMEOUT_MS the download is considered stalled.
+        let inactivityTimer = setTimeout(() => {
+          res.destroy();
+          done(() => reject(new Error('Download stalled: no data received within timeout')));
+        }, DOWNLOAD_INACTIVITY_TIMEOUT_MS);
+        const resetTimer = () => {
+          clearTimeout(inactivityTimer);
+          inactivityTimer = setTimeout(() => {
+            res.destroy();
+            done(() => reject(new Error('Download stalled: no data received within timeout')));
+          }, DOWNLOAD_INACTIVITY_TIMEOUT_MS);
+        };
+
         const file = fs.createWriteStream(destPath);
+        res.on('data', resetTimer);
         res.on('error', (err) => {
+          clearTimeout(inactivityTimer);
           file.close();
-          reject(err);
+          done(() => reject(err));
         });
         res.pipe(file);
         file.on('finish', () => {
+          clearTimeout(inactivityTimer);
           file.close();
           fs.chmodSync(destPath, 0o755);
-          resolve();
+          done(() => resolve());
         });
-        file.on('error', reject);
-      }).on('error', reject);
+        file.on('error', (err) => {
+          clearTimeout(inactivityTimer);
+          done(() => reject(err));
+        });
+      });
+      req.on('error', (err) => done(() => reject(err)));
+      req.on('timeout', () => {
+        req.destroy();
+        done(() => reject(new Error('Connection timed out while starting download')));
+      });
     };
     follow(url);
   });

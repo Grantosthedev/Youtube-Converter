@@ -97,6 +97,44 @@ Each project has two extra colour tokens set via JS `projectColors()`:
 - ❌ Never hardcode `rgba(255,255,255,X)` subtle backgrounds in light mode — use `rgba(0,0,0,X)`
 - ❌ Never use `color: var(--white)` on elements that sit on `--red-dark` backgrounds in light mode
 
+## Truncation
+
+**Always use middle truncation** — never end-truncation for user-facing title/content strings. This mirrors macOS Finder's `NSLineBreakByTruncatingMiddle` behaviour: showing the start (what it is) and the end (episode number, qualifier, file extension) with `…` in the middle.
+
+**Two utilities** in `renderer.js` — use the right one for the context:
+- `midTruncate(str, maxLen)` — character-count based, for fixed-width contexts (dialogs, stored titles)
+- `observeQueueTitle(el, fullTitle)` — pixel-accurate, ResizeObserver + canvas measurement for dynamic-width elements like queue cards. Automatically re-truncates on every resize. Pair with `unobserveQueueTitle(el)` on removal.
+
+```js
+// 58% front · … · 35% tail — matches Apple's Finder split ratio
+function midTruncate(str, maxLen = 65) {
+  if (!str || str.length <= maxLen) return str;
+  const tail = Math.floor(maxLen * 0.35);
+  const head = maxLen - tail - 1;
+  return str.slice(0, head) + '…' + str.slice(-tail);
+}
+```
+
+**Character budgets by context:**
+
+| Context | Budget | Notes |
+|---|---|---|
+| Queue item titles | 65 | Standard queue width |
+| History list / grid card titles | 65 | Same |
+| History compact row titles | 50 | Narrower layout |
+| Cancel / delete dialog subtitles | 55–60 | Fixed-width dialogs |
+| Instagram caption display titles | 80 | Wider header area |
+| File paths | n/a | Use `truncatePath()` instead — Apple path-component style |
+
+**Rules:**
+- ✅ For **dynamic-width elements** (queue cards): use `observeQueueTitle(el, fullTitle)` after inserting the element — never put a pre-truncated string in the template
+- ✅ For **fixed-width contexts** (dialogs, history titles): use `midTruncate(str, maxLen)` before inserting, wrapped with `escapeHtml()`: `${escapeHtml(midTruncate(title, 65))}`
+- ✅ Call `unobserveQueueTitle(el.querySelector('.queue-item__title'))` before removing any queue item from the DOM
+- ✅ Keep CSS `text-overflow: ellipsis` on truncated elements as a last-resort safety fallback
+- ❌ Never use `.slice(0, N) + '…'` for any visible UI string — that is end-truncation
+- ❌ Do NOT apply `midTruncate()` to short badge labels (project pills, quality chips, channel names in chips) — end-truncation via CSS is correct there
+- ❌ Do NOT apply `midTruncate()` to data-layer strings stored to DB (captions, descriptions, stderr)
+
 ## Key Components
 - **URL Row** — white 2px border pill, `background: transparent`, max 900px
 - **Download button** — red pill inside URL row, 10px inset margin, 38px tall

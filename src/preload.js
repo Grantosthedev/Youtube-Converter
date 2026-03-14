@@ -21,10 +21,12 @@ contextBridge.exposeInMainWorld('api', {
   getProjects: () => ipcRenderer.invoke('get-projects'),
   getActiveProject: () => ipcRenderer.invoke('get-active-project'),
   setActiveProject: (name) => ipcRenderer.invoke('set-active-project', name),
+  createProject: (name) => ipcRenderer.invoke('create-project', name),
   deleteProject: (name) => ipcRenderer.invoke('delete-project', name),
   getHistory: () => ipcRenderer.invoke('get-history'),
-  deleteHistoryEntry: (id) => ipcRenderer.invoke('delete-history-entry', id),
+  deleteHistoryEntry: (id, deleteFile = false) => ipcRenderer.invoke('delete-history-entry', id, deleteFile),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
+  updateHistoryEntryProject: (id, project) => ipcRenderer.invoke('update-history-entry-project', { id, project }),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   saveFile: (options) => ipcRenderer.invoke('save-file', options),
   showNotification: (title, body, filePath, stickerType) => ipcRenderer.invoke('show-notification', title, body, filePath, stickerType),
@@ -63,5 +65,10 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('background-activity', listener);
     return () => ipcRenderer.removeListener('background-activity', listener);
+  },
+  onHistoryEntryUpdated: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('history-entry-updated', listener);
+    return () => ipcRenderer.removeListener('history-entry-updated', listener);
   },
 });

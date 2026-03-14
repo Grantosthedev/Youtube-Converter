@@ -20,7 +20,7 @@
       <div id="queuePanel" class="queue-panel">
         <div class="queue-panel__header">
           <span class="queue-panel__title">Downloads</span>
-          <button id="queueClearDone" class="queue-panel__clear" style="display:none">Clear Done</button>
+          <button id="queueClearDone" class="queue-panel__clear" style="display:none"><i class="hgi-stroke hgi-clean ui-icon ui-icon--xs" aria-hidden="true"></i>Clear Done</button>
         </div>
         <div id="queueList" class="queue-panel__list"></div>
         <div id="queueEmpty" class="queue-panel__empty visible">
@@ -39,7 +39,7 @@
 
     <!-- Path + Project row -->
     <div class="path-row">
-      <div id="pathDisplay" class="path-display" title="" data-tooltip="Click to change your save folder."><span class="path-display__label">save to:</span> ~/Downloads/YT Clips</div>
+      <div id="pathDisplay" class="path-display" title="" data-tooltip="Click to change your save folder."><span class="path-display__label"><i class="hgi-stroke hgi-folder-02 ui-icon ui-icon--xs" aria-hidden="true"></i>save to:</span> ~/Downloads/YT Clips</div>
       <div class="path-row__spacer"></div>
       <div class="project-anchor">
         <button id="projectBtn" class="project-btn" aria-label="Set project" data-tooltip="Group your downloads into named projects.">+ Project</button>
@@ -112,6 +112,7 @@
         <div id="videoMeta" class="video-card__meta"></div>
         <div id="videoQualities" class="video-card__qualities"></div>
       </div>
+      <div id="videoCardAction" class="video-card__action"></div>
     </div>
 
     <!-- Carousel Picker (Instagram multi-image posts) -->
@@ -156,15 +157,20 @@
             <span class="toggle__knob"></span>
           </button>
         </div>
-        <div class="settings-row">
-          <span class="settings-label" data-tooltip="Unlocks specific resolution and format picking. More control, more decisions. For nerds.">Professional Mode</span>
-          <button id="modeToggle" class="toggle" aria-label="Toggle professional mode">
-            <span class="toggle__knob"></span>
-          </button>
+        <div class="settings-divider"></div>
+        <div class="settings-row settings-row--stacked">
+          <span class="settings-label" data-tooltip="Normal: clean and calm. Unhinged: chaos and personality. Diabolical: absolute maximum abuse. Your funeral.">Personality</span>
+          <div id="modeToggle" class="mode-switcher" aria-label="Personality mode">
+            <span class="seg-pill"></span>
+            <button class="mode-switcher__btn" data-mode="professional">Normal</button>
+            <button class="mode-switcher__btn" data-mode="unhinged">Unhinged</button>
+            <button class="mode-switcher__btn" data-mode="diabolical">Diabolical</button>
+          </div>
         </div>
-        <div class="settings-row">
+        <div class="settings-row settings-row--stacked">
           <span class="settings-label" data-tooltip="Dark, light, or follow the system. Picks the window vibrancy too, not just colours.">Appearance</span>
           <div id="themeToggle" class="theme-toggle">
+            <span class="seg-pill"></span>
             <button class="theme-btn" data-theme="dark" aria-label="Dark mode">
               <i class="hgi-stroke hgi-moon-02 ui-icon ui-icon--xs"></i>
             </button>
@@ -176,11 +182,12 @@
             </button>
           </div>
         </div>
+        <div class="settings-divider"></div>
         <button id="historyBtn" class="settings-action-btn"><i class="hgi-stroke hgi-clock-01 ui-icon" aria-hidden="true"></i>History</button>
         <div class="settings-divider"></div>
         <button id="appUpdateBtn" class="settings-action-btn settings-app-update" style="display:none">Update Available</button>
         <div class="settings-row">
-          <button id="updateYtdlpBtn" class="settings-update-btn" data-tooltip="Update the download engine (yt-dlp) to the latest version.">Update</button>
+          <button id="updateYtdlpBtn" class="settings-update-btn" data-tooltip="Update the download engine (yt-dlp) to the latest version."><i class="hgi-stroke hgi-arrows-reload-01 ui-icon ui-icon--xs" aria-hidden="true"></i>Update</button>
           <span id="appVersion" class="settings-version"></span>
         </div>
         <span id="updateStatus" class="update-status"></span>
@@ -213,7 +220,7 @@
 
     <!-- Drag & Drop Overlay -->
     <div id="dropOverlay" class="drop-overlay">
-      <div class="drop-overlay__content">Drop a link here</div>
+      <div class="drop-overlay__content"><i class="hgi-stroke hgi-link-02 drop-overlay__icon" aria-hidden="true"></i>Drop a link here</div>
     </div>
 
   </div>
@@ -223,7 +230,7 @@
     <span class="status-message__icon" id="statusIcon"></span>
     <span class="status-message__text" id="statusText"></span>
     <button id="statusCopy" class="status-action-btn" style="display:none"><i class="hgi-stroke hgi-copy-01 ui-icon ui-icon--action" aria-hidden="true"></i></button>
-    <button id="statusRetry" class="status-action-btn" style="display:none">Retry</button>
+      <button id="statusRetry" class="status-action-btn" style="display:none"><i class="hgi-stroke hgi-arrows-reload-01 ui-icon" aria-hidden="true"></i>Retry</button>
   </div>
 
   <!-- Activity Toast (subtle bottom-center background task indicator) -->
@@ -245,14 +252,15 @@
 
     <div class="history-toolbar">
       <div class="history-search-wrap">
+        <i class="hgi-stroke hgi-search-01 ui-icon history-search__icon" aria-hidden="true"></i>
         <input type="text" id="historySearch" class="history-search" placeholder="Search title, channel, URL..." spellcheck="false" autocomplete="off">
       </div>
       <div class="history-filters">
         <div class="history-filter-pill" id="historyFilterPill"></div>
         <button class="history-filter active" data-filter="all">All</button>
-        <button class="history-filter" data-filter="video">Video</button>
-        <button class="history-filter" data-filter="audio">Audio</button>
-        <button class="history-filter" data-filter="image">Image</button>
+        <button class="history-filter" data-filter="video"><i class="hgi-stroke hgi-video-01 ui-icon ui-icon--xs" aria-hidden="true"></i>Video</button>
+        <button class="history-filter" data-filter="audio"><i class="hgi-stroke hgi-headphones ui-icon ui-icon--xs" aria-hidden="true"></i>Audio</button>
+        <button class="history-filter" data-filter="image"><i class="hgi-stroke hgi-image-01 ui-icon ui-icon--xs" aria-hidden="true"></i>Image</button>
         <div class="history-project-filter" id="historyProjectFilter" style="display:none">
           <button id="historyProjectBtn" class="history-filter history-project-filter-btn">
             <span class="history-project-filter-btn__label">All Projects</span>
@@ -263,7 +271,7 @@
       </div>
     </div>
 
-    <div class="history-sort-row">
+    <div id="historySortRow" class="history-sort-row">
       <span id="historyCount" class="history-count">0 downloads</span>
       <div class="history-view-toggles">
         <button class="history-view-btn active" data-view="list" aria-label="List view" data-tooltip="List view">
@@ -276,7 +284,14 @@
           <i class="hgi-stroke hgi-menu-01 ui-icon" aria-hidden="true"></i>
         </button>
       </div>
-      <button id="historySortBtn" class="history-sort-btn" data-sort="newest">Newest first</button>
+      <div class="history-sort-wrap" id="historySortWrap">
+        <button id="historySortBtn" class="history-sort-btn">
+          <i class="hgi-stroke hgi-sorting-01 ui-icon ui-icon--sm" aria-hidden="true"></i>
+          <span>Newest first</span>
+          <i class="hgi-stroke hgi-arrow-down-01 ui-icon history-sort-btn__chevron" aria-hidden="true"></i>
+        </button>
+        <div id="historySortMenu" class="history-sort-menu"></div>
+      </div>
     </div>
 
     <div id="historyList" class="history-list"></div>
@@ -288,6 +303,7 @@
   </div>
 
   <div id="tooltip" class="ui-tooltip" role="tooltip" aria-hidden="true"></div>
+  <div id="historyProjectReassignPopover" class="history-reassign-popover" aria-hidden="true"></div>
   <script src="renderer.js"></script>
 </body>
 </html>
