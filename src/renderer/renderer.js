@@ -3515,7 +3515,7 @@ pathDisplay.addEventListener('click', async () => {
 });
 
 function getEffectivePath() {
-  if (state.activeProject) {
+  if (state.activeProject && state.projectSubfolders[state.activeProject] !== false) {
     return state.downloadPath + '/' + state.activeProject;
   }
   return state.downloadPath;
@@ -3631,15 +3631,25 @@ function renderProjectList(filter) {
     row.style.setProperty('--proj-light-bg', c.lightBg);
     row.style.setProperty('--proj-light-text', c.lightText);
     const count = counts[name] || 0;
+    const subfolderOn = state.projectSubfolders[name] !== false;
+    const subfolderIcon = subfolderOn ? 'folder-02' : 'folder-off';
     row.innerHTML = `
       <span class="project-dropdown__item-dot" style="background:${c.bright}"></span>
       <span class="project-dropdown__item-name">${escapeHtml(name)}</span>
       <span class="project-dropdown__item-count">${count}</span>
+      <span class="project-dropdown__item-subfolder${subfolderOn ? ' active' : ''}" title="${subfolderOn ? 'Saving to subfolder' : 'Saving to root folder'}" data-tooltip="${subfolderOn ? 'Downloads save to a project subfolder' : 'Downloads save to your main folder'}">${icon(subfolderIcon, 'ui-icon ui-icon--sm')}</span>
       <span class="project-dropdown__item-delete" title="Delete project">${icon('cancel-01', 'ui-icon ui-icon--sm')}</span>
     `;
+    row.querySelector('.project-dropdown__item-subfolder').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newVal = state.projectSubfolders[name] === false;
+      state.projectSubfolders = await window.api.setProjectSubfolder(name, newVal);
+      renderProjectList(projectInput.value.trim());
+      updatePathDisplay();
+    });
     row.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (e.target.closest('.project-dropdown__item-delete')) return;
+      if (e.target.closest('.project-dropdown__item-delete') || e.target.closest('.project-dropdown__item-subfolder')) return;
       if (state.activeProject === name) {
         setActiveProject(null);
       } else {
@@ -4060,7 +4070,7 @@ function buildExportData(entries) {
 
 function buildExportCsv(entries) {
   const headers = [
-    'Title', 'Source', 'Platform', 'Media Type', 'Channel', 'Channel URL',
+    'Title', 'URL', 'Platform', 'Media Type', 'Channel', 'Channel URL',
     'Upload Date', 'Downloaded At', 'Duration', 'Clip', 'Quality', 'Format',
     'Views', 'Likes', 'File', 'File Size', 'Project', 'Categories', 'Tags',
     'License', 'Description',
@@ -4075,44 +4085,50 @@ function buildExportCsv(entries) {
     return str;
   }
 
-  const rows = [headers.join(',')];
-  const sorted = [...entries].sort((a, b) => new Date(b.downloadedAt) - new Date(a.downloadedAt));
-
-  for (const e of sorted) {
-    const isCarousel = e.mediaType === 'carousel' && e.carouselItems?.length > 0;
-    const isImage = e.mediaType === 'image' || isCarousel;
+  function buildRow(e, fileOverride, sizeOverride, formatOverride, mediaTypeOverride) {
+    const isImage = (mediaTypeOverride || e.mediaType) === 'image' || (mediaTypeOverride || e.mediaType) === 'carousel';
     const clipStart = e.clipStart && e.clipStart !== '00:00:00' ? e.clipStart : null;
     const clipEnd   = e.clipEnd   && e.clipEnd   !== '00:00:00' ? e.clipEnd   : null;
     const clip = clipStart || clipEnd ? `${clipStart || '00:00:00'} to ${clipEnd || 'end'}` : '';
-    const file     = isCarousel ? `${e.carouselItems.length} files` : (e.filePath || '');
-    const fileSize = formatFileSize(e.fileSize);
-    const quality  = !isImage
-      ? `${qualityLabel(e.quality, e.resolution)} · ${(e.format || '').toUpperCase()}`
-      : '';
+    const fmt = formatOverride || e.format || '';
 
-    rows.push([
+    return [
       e.title || '',
       e.webpageUrl || '',
       e.platform || '',
-      e.mediaType || '',
+      mediaTypeOverride || e.mediaType || '',
       e.channel || e.uploader || '',
       e.channelUrl || '',
       e.uploadDate ? formatUploadDate(e.uploadDate) : '',
       formatFullDate(e.downloadedAt),
       !isImage ? formatDuration(e.duration) : '',
       clip,
-      quality,
-      e.format || '',
+      !isImage ? qualityLabel(e.quality, e.resolution) : '',
+      fmt.toUpperCase(),
       e.viewCount != null ? e.viewCount : '',
       e.likeCount != null ? e.likeCount : '',
-      file,
-      fileSize,
+      fileOverride ?? e.filePath ?? '',
+      sizeOverride ?? formatFileSize(e.fileSize),
       e.project || '',
       (e.categories || []).join(' | '),
       (e.tags || []).join(' | '),
       e.license || '',
       e.description || '',
-    ].map(cell).join(','));
+    ].map(cell).join(',');
+  }
+
+  const rows = [headers.join(',')];
+
+  for (const e of entries) {
+    const isCarousel = e.mediaType === 'carousel' && e.carouselItems?.length > 0;
+
+    if (isCarousel) {
+      for (const ci of e.carouselItems) {
+        rows.push(buildRow(e, ci.filePath || '', formatFileSize(ci.fileSize), ci.format, ci.mediaType));
+      }
+    } else {
+      rows.push(buildRow(e));
+    }
   }
 
   // BOM so Excel/Numbers auto-detect UTF-8
@@ -5460,6 +5476,7 @@ async function init() {
   state.activeProject = settings.activeProject || null;
   state.projects = settings.projects || [];
   state.projectHues = settings.projectHues || {};
+  state.projectSubfolders = settings.projectSubfolders || {};
   state.historyData = await window.api.getHistory();
   updateProjectUI();
   appVersion.textContent = `v${version}`;
@@ -5509,6 +5526,56 @@ async function init() {
       showStatus('info', tp('newVersionAvailable', update.version) || `New version v${update.version} available! Check Settings.`);
     }
   } catch { /* no update check errors shown */ }
+
+  window.api.onUpdateReady((version) => {
+    showUpdateDialog(version);
+  });
+}
+
+function showUpdateDialog(version) {
+  const existing = document.querySelector('.delete-dialog-overlay.update-dialog');
+  if (existing) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'delete-dialog-overlay update-dialog';
+
+  overlay.innerHTML = `
+    <div class="delete-dialog" role="dialog" aria-modal="true">
+      <div class="delete-dialog__title">Fresh Update, Fam</div>
+      <div class="delete-dialog__subtitle">v${escapeHtml(version)} just downloaded. Restart to apply it.</div>
+      <div class="delete-dialog__actions">
+        <button class="delete-dialog__btn delete-dialog__btn--danger" data-choice="restart">
+          <span class="delete-dialog__btn-label">Restart and Update</span>
+          <span class="delete-dialog__btn-sub">Takes a few seconds.</span>
+        </button>
+      </div>
+      <button class="delete-dialog__cancel" data-choice="later">Later</button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('visible'));
+
+  function close() {
+    overlay.classList.remove('visible');
+    overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+  }
+
+  overlay.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-choice]');
+    if (btn) {
+      if (btn.dataset.choice === 'restart') {
+        window.api.installUpdate();
+      } else {
+        close();
+      }
+      return;
+    }
+    if (!e.target.closest('.delete-dialog')) close();
+  });
+
+  const onKey = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); close(); } };
+  document.addEventListener('keydown', onKey);
 }
 
 init();

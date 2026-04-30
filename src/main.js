@@ -3,10 +3,47 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const Store = require('electron-store');
-const { fetchVideoInfo, startDownload, fetchCarouselVideos, cleanStaleYtdlpTemp } = require('./ytdlp');
+const { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp } = require('./ytdlp');
 const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, ensureYtdlpFresh } = require('./updater');
 const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
-const { fetchMediaInfo, downloadImage, fetchImageAsDataUri } = require('./media-fetcher');
+const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = require('./media-fetcher');
+
+setYtdlpFetcher(fetchInstagramMediaViaYtdlp);
+
+function setupAutoUpdater() {
+  if (!app.isPackaged || process.platform !== 'darwin') return;
+  try {
+    const { autoUpdater } = require('electron');
+    const feed = `https://update.electronjs.org/Grantosthedev/Youtube-Converter/${process.platform}-${process.arch}/${app.getVersion()}`;
+    autoUpdater.setFeedURL({ url: feed });
+
+    autoUpdater.on('update-downloaded', (_event, releaseNotes, releaseName) => {
+      const ver = (releaseName || '').replace(/^v/, '') || 'new version';
+      console.log(`[auto-update] Update downloaded: ${ver}`);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update-ready', ver);
+      }
+    });
+
+    autoUpdater.on('error', (err) => {
+      console.warn('[auto-update] Error:', err.message);
+    });
+
+    autoUpdater.checkForUpdates();
+    setInterval(() => {
+      try { autoUpdater.checkForUpdates(); } catch { /* ignore */ }
+    }, 60 * 60 * 1000);
+  } catch (err) {
+    console.warn('[auto-update] disabled:', err.message);
+  }
+}
+
+ipcMain.handle('install-update', () => {
+  try {
+    const { autoUpdater } = require('electron');
+    autoUpdater.quitAndInstall();
+  } catch { /* ignore in dev */ }
+});
 
 const GOOD_STICKERS = [
   'good14.png', 'good23.png', 'good24.png', 'good25.png', 'good26.png',
@@ -41,6 +78,7 @@ const store = new Store({
     downloadHistory: [],
     projects: [],
     projectHues: {},
+    projectSubfolders: {},
     activeProject: null,
     lastYtdlpCheck: 0,
     lastCacheCleared: 0,
@@ -153,6 +191,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    setupAutoUpdater();
   });
 
   mainWindow.on('focus', () => {
@@ -241,7 +280,8 @@ ipcMain.handle('start-download', async (event, options) => {
   const platform = detectPlatform(options.url);
   const basePath = options.outputPath || store.get('downloadPath');
   const activeProject = store.get('activeProject');
-  const downloadPath = activeProject ? path.join(basePath, activeProject) : basePath;
+  const useSubfolder = activeProject && store.get('projectSubfolders')[activeProject] !== false;
+  const downloadPath = useSubfolder ? path.join(basePath, activeProject) : basePath;
 
   if (!pathExists(downloadPath)) {
     try {
@@ -453,7 +493,8 @@ ipcMain.handle('proxy-image', async (_event, url) => {
 ipcMain.handle('download-image', async (_event, options) => {
   const imageBasePath = options.outputPath || store.get('downloadPath');
   const imageActiveProject = store.get('activeProject');
-  const downloadPath = imageActiveProject ? path.join(imageBasePath, imageActiveProject) : imageBasePath;
+  const imageUseSubfolder = imageActiveProject && store.get('projectSubfolders')[imageActiveProject] !== false;
+  const downloadPath = imageUseSubfolder ? path.join(imageBasePath, imageActiveProject) : imageBasePath;
 
   if (!pathExists(downloadPath)) {
     try {
@@ -622,15 +663,19 @@ ipcMain.handle('select-folder', async () => {
 });
 
 ipcMain.handle('reveal-in-finder', async (_event, filePath) => {
-  const downloadDir = path.resolve(store.get('downloadPath'));
   if (filePath) {
     const resolved = path.resolve(filePath);
-    if (resolved.startsWith(downloadDir) && fs.existsSync(resolved)) {
+    if (fs.existsSync(resolved)) {
       shell.showItemInFolder(resolved);
       return { found: true };
     }
+    const savedDir = path.dirname(resolved);
+    if (fs.existsSync(savedDir)) {
+      shell.openPath(savedDir);
+      return { found: false };
+    }
   }
-  shell.openPath(downloadDir);
+  shell.openPath(path.resolve(store.get('downloadPath')));
   return { found: false };
 });
 
@@ -646,6 +691,7 @@ ipcMain.handle('get-settings', async () => {
     activeProject: store.get('activeProject'),
     projects: store.get('projects'),
     projectHues: ensureProjectHues(),
+    projectSubfolders: store.get('projectSubfolders'),
   };
 });
 
@@ -668,6 +714,13 @@ ipcMain.handle('get-ytdlp-version', async () => {
 });
 
 ipcMain.handle('check-app-update', async () => {
+  if (app.isPackaged && process.platform === 'darwin') {
+    try {
+      const { autoUpdater } = require('electron');
+      autoUpdater.checkForUpdates();
+      return { available: false, checking: true };
+    } catch { /* fall through */ }
+  }
   const currentVersion = app.getVersion();
   return await checkAppUpdate(currentVersion);
 });
@@ -777,6 +830,9 @@ ipcMain.handle('delete-project', async (_event, projectName) => {
   const hues = store.get('projectHues');
   delete hues[projectName];
   store.set('projectHues', hues);
+  const subfolders = store.get('projectSubfolders');
+  delete subfolders[projectName];
+  store.set('projectSubfolders', subfolders);
   if (store.get('activeProject') === projectName) {
     store.set('activeProject', null);
   }
@@ -788,6 +844,13 @@ ipcMain.handle('delete-project', async (_event, projectName) => {
   store.set('downloadHistory', updated);
 
   return { projects, projectHues: hues };
+});
+
+ipcMain.handle('set-project-subfolder', (_event, name, enabled) => {
+  const subfolders = { ...store.get('projectSubfolders') };
+  subfolders[name] = enabled;
+  store.set('projectSubfolders', subfolders);
+  return subfolders;
 });
 
 ipcMain.handle('get-history', async () => {
@@ -848,7 +911,7 @@ ipcMain.handle('open-external', async (_event, url) => {
 ipcMain.handle('save-file', async (_event, { defaultPath, content }) => {
   const { canceled, filePath } = await dialog.showSaveDialog({
     defaultPath,
-    filters: [{ name: 'JSON', extensions: ['json'] }],
+    filters: [{ name: 'CSV Spreadsheet', extensions: ['csv'] }],
   });
   if (canceled || !filePath) return { saved: false };
   await fs.promises.writeFile(filePath, content, 'utf8');

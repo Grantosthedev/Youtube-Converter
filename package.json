@@ -1,13 +1,14 @@
 {
   "name": "downroad",
   "productName": "Downroad",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Download videos and images from YouTube, Instagram, and TikTok. Set in/out points, choose quality, and download clips without fetching the full video.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
+    "publish": "electron-forge publish",
     "postinstall": "node scripts/download-ytdlp.js"
   },
   "author": "Grantosthedev",
@@ -22,6 +23,7 @@
     "@electron-forge/maker-zip": "^7.11.1",
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.1",
     "@electron-forge/plugin-fuses": "^7.11.1",
+    "@electron-forge/publisher-github": "^7.11.1",
     "@electron/fuses": "^1.8.0",
     "dotenv": "^17.3.1",
     "electron": "^40.8.0"

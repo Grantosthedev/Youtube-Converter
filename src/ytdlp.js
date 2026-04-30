@@ -493,7 +493,8 @@ function startDownload(options, onProgress, onComplete, onError) {
 
   cleanStaleYtdlpTemp();
   const args = buildDownloadArgs({ ...options, ffmpegDir });
-  console.log('[yt-dlp] spawn:', args.join(' '));
+  const safeArgs = args.map(a => /^https?:\/\//.test(a) ? a.replace(/\?.*$/, '?<redacted>') : a);
+  console.log('[yt-dlp] spawn:', safeArgs.join(' '));
   const proc = spawn(ytdlp, args);
 
   const MAX_STDERR = 10 * 1024;
@@ -610,4 +611,95 @@ function fetchCarouselVideos(url) {
   });
 }
 
-module.exports = { fetchVideoInfo, startDownload, fetchCarouselVideos, cleanStaleYtdlpTemp };
+function fetchInstagramMediaViaYtdlp(url) {
+  return new Promise((resolve) => {
+    const ytdlp = getYtdlpPath();
+    const ffmpeg = getFfmpegPath();
+
+    const args = [
+      '--dump-json',
+      '--no-warnings',
+      '--ffmpeg-location', path.dirname(ffmpeg),
+      url,
+    ];
+
+    cleanStaleYtdlpTemp();
+    const proc = spawn(ytdlp, args);
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill('SIGTERM');
+      setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 3000);
+    }, 60000);
+
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed || code !== 0) {
+        resolve(null);
+        return;
+      }
+      try {
+        const lines = stdout.trim().split('\n');
+        const items = [];
+        let owner = '';
+        let caption = '';
+        let timestamp = '';
+
+        for (const line of lines) {
+          try {
+            const info = JSON.parse(line);
+            if (!owner) owner = info.uploader || info.channel || '';
+            if (!caption) caption = (info.description || '').slice(0, 300);
+            if (!timestamp && info.upload_date) {
+              const d = info.upload_date;
+              timestamp = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+            }
+
+            const isVideo = (info.duration && info.duration > 0) || info.vcodec !== 'none';
+            const thumb = info.thumbnail || info.thumbnails?.[info.thumbnails.length - 1]?.url || '';
+            const mediaUrl = info.url || '';
+
+            if (mediaUrl) {
+              items.push({
+                type: isVideo ? 'video' : 'image',
+                url: mediaUrl,
+                thumbnail: thumb,
+                width: info.width || 0,
+                height: info.height || 0,
+              });
+            }
+          } catch { /* skip unparseable lines */ }
+        }
+
+        if (items.length === 0) {
+          resolve(null);
+          return;
+        }
+
+        resolve({
+          isCarousel: items.length > 1,
+          owner,
+          caption,
+          timestamp,
+          items,
+          _fromYtdlp: true,
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+
+    proc.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
+}
+
+module.exports = { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp };

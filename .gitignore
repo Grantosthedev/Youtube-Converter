@@ -4,3 +4,9 @@ bin/
 .DS_Store
 *.log
 .env
+.env.*
+*.p12
+*.pem
+*.key
+*.cert
+credentials.json

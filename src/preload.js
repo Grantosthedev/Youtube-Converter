@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   setActiveProject: (name) => ipcRenderer.invoke('set-active-project', name),
   createProject: (name) => ipcRenderer.invoke('create-project', name),
   deleteProject: (name) => ipcRenderer.invoke('delete-project', name),
+  setProjectSubfolder: (name, enabled) => ipcRenderer.invoke('set-project-subfolder', name, enabled),
   getHistory: () => ipcRenderer.invoke('get-history'),
   deleteHistoryEntry: (id, deleteFile = false) => ipcRenderer.invoke('delete-history-entry', id, deleteFile),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
@@ -71,4 +72,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('history-entry-updated', listener);
     return () => ipcRenderer.removeListener('history-entry-updated', listener);
   },
+  onUpdateReady: (callback) => {
+    const listener = (_event, version) => callback(version);
+    ipcRenderer.on('update-ready', listener);
+    return () => ipcRenderer.removeListener('update-ready', listener);
+  },
+  installUpdate: () => ipcRenderer.invoke('install-update'),
 });

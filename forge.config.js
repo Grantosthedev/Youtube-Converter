@@ -16,6 +16,7 @@ module.exports = {
       /^\/bin($|\/)/,
       /^\/assets($|\/)/,
       /^\/build($|\/)/,
+      /^\/config($|\/)/,
       /^\/scripts($|\/)/,
       /^\/out($|\/)/,
       /^\/\.git/,
@@ -28,7 +29,7 @@ module.exports = {
       /\/CHANGELOG(\.md)?$/i,
     ],
     osxSign: {
-      identity: 'Developer ID Application: Grant Jenkins (89SDQA6945)',
+      identity: process.env.APPLE_SIGNING_IDENTITY || 'Developer ID Application',
       hardenedRuntime: true,
       entitlements: path.join(__dirname, 'build', 'entitlements.plist'),
       entitlementsInherit: path.join(__dirname, 'build', 'entitlements.inherit.plist'),
@@ -66,5 +67,18 @@ module.exports = {
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
     }),
+  ],
+  publishers: [
+    {
+      name: '@electron-forge/publisher-github',
+      config: {
+        repository: {
+          owner: 'Grantosthedev',
+          name: 'Youtube-Converter',
+        },
+        draft: true,
+        prerelease: false,
+      },
+    },
   ],
 };
