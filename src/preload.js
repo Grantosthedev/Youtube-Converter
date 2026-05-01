@@ -72,10 +72,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('history-entry-updated', listener);
     return () => ipcRenderer.removeListener('history-entry-updated', listener);
   },
-  onUpdateReady: (callback) => {
-    const listener = (_event, version) => callback(version);
-    ipcRenderer.on('update-ready', listener);
-    return () => ipcRenderer.removeListener('update-ready', listener);
+  onAppUpdateStatus: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('app-update-status', listener);
+    return () => ipcRenderer.removeListener('app-update-status', listener);
   },
+  getAppUpdateStatus: () => ipcRenderer.invoke('get-app-update-status'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
 });

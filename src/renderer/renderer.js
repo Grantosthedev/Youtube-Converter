@@ -77,10 +77,16 @@ const autoPasteToggle = $('#autoPasteToggle');
 const showInFinderToggle = $('#showInFinderToggle');
 const instantDownloadToggle = $('#instantDownloadToggle');
 const modeToggle = $('#modeToggle');
-const updateYtdlpBtn = $('#updateYtdlpBtn');
+const updateEngineBtn = $('#updateEngineBtn');
+const engineVersion = $('#engineVersion');
+const engineSpinner = $('#engineSpinner');
 const updateStatus = $('#updateStatus');
 const appVersion = $('#appVersion');
-const appUpdateBtn = $('#appUpdateBtn');
+const checkAppUpdateBtn = $('#checkAppUpdateBtn');
+const appUpdateBanner = $('#appUpdateBanner');
+const appUpdateBannerLabel = $('#appUpdateBannerLabel');
+const appUpdateBannerBtn = $('#appUpdateBannerBtn');
+const settingsUpdateDot = $('#settingsUpdateDot');
 const historyBtn = $('#historyBtn');
 const historyView = $('#historyView');
 const historyBack = $('#historyBack');
@@ -3080,6 +3086,8 @@ window.api.onDownloadCancelled((data) => {
    ============================================================ */
 
 window.api.onYtdlpUpdated((version) => {
+  engineVersion.textContent = version;
+  engineVersion.style.display = '';
   showStatusFromPool('success', 'engineUpdatedToast', version);
 });
 
@@ -3828,20 +3836,20 @@ modeToggle.addEventListener('click', (e) => {
 enforceTimeFormat(startTime);
 enforceTimeFormat(endTime);
 
-updateYtdlpBtn.addEventListener('click', async (e) => {
+updateEngineBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
-  updateYtdlpBtn.disabled = true;
-  updateYtdlpBtn.textContent = t('Updating…');
-  updateYtdlpBtn.classList.add('updating');
+  updateEngineBtn.disabled = true;
+  engineSpinner.style.display = '';
   updateStatus.textContent = t('Downloading latest version…');
   updateStatus.className = 'update-status';
   try {
     const result = await window.api.updateYtdlp();
     if (result.success) {
-      updateStatus.textContent = t('Done!');
+      engineVersion.textContent = result.version;
+      engineVersion.style.display = '';
+      updateStatus.textContent = '';
       updateStatus.className = 'update-status success';
       showStatusFromPool('success', 'engineUpdatedToast', result.version);
-      setTimeout(() => { updateStatus.textContent = ''; }, 4000);
     } else {
       updateStatus.textContent = result.error || t('Something went wrong');
       updateStatus.className = 'update-status error';
@@ -3850,10 +3858,22 @@ updateYtdlpBtn.addEventListener('click', async (e) => {
     updateStatus.textContent = t('Couldn\'t reach the server. Check your connection.');
     updateStatus.className = 'update-status error';
   } finally {
-    updateYtdlpBtn.disabled = false;
-    updateYtdlpBtn.textContent = t('Update');
-    updateYtdlpBtn.classList.remove('updating');
+    updateEngineBtn.disabled = false;
+    engineSpinner.style.display = 'none';
   }
+});
+
+checkAppUpdateBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  checkAppUpdateBtn.disabled = true;
+  checkAppUpdateBtn.classList.add('spinning');
+  try {
+    await window.api.checkAppUpdate();
+  } catch { /* errors handled via status channel */ }
+  setTimeout(() => {
+    checkAppUpdateBtn.disabled = false;
+    checkAppUpdateBtn.classList.remove('spinning');
+  }, 2000);
 });
 
 /* ============================================================
@@ -4622,6 +4642,71 @@ function getHistorySortBadgeHtml(entry, viewMode) {
   return '';
 }
 
+function revealExpandButtons(container) {
+  container.querySelectorAll('.history-dd--expandable').forEach(dd => {
+    const textEl = dd.querySelector('.history-dd-text');
+    const btn = dd.querySelector('.history-expand-row-btn');
+    if (!textEl || !btn) return;
+    if (textEl.scrollWidth > textEl.clientWidth + 1) {
+      btn.classList.add('visible');
+    } else {
+      btn.classList.remove('visible');
+    }
+  });
+}
+
+function toggleExpandRow(dd) {
+  const textEl = dd.querySelector('.history-dd-text');
+  const btn = dd.querySelector('.history-expand-row-btn');
+  if (!textEl || !btn) return;
+
+  const detail = dd.closest('.history-entry__detail');
+  const isExpanded = dd.classList.contains('history-dd--expanded');
+
+  if (detail && detail._rowExpandAnim) {
+    detail._rowExpandAnim.cancel();
+    detail._rowExpandAnim = null;
+    detail.style.height = 'auto';
+  }
+
+  const startHeight = detail ? detail.offsetHeight : 0;
+
+  if (isExpanded) {
+    dd.classList.remove('history-dd--expanded');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'Show more');
+    if (dd.classList.contains('file-link') && dd.dataset.filepath) {
+      textEl.textContent = truncatePath(dd.dataset.filepath);
+    }
+  } else {
+    dd.classList.add('history-dd--expanded');
+    btn.setAttribute('aria-expanded', 'true');
+    btn.setAttribute('aria-label', 'Show less');
+    if (dd.classList.contains('file-link') && dd.dataset.filepath) {
+      textEl.textContent = dd.dataset.filepath;
+    }
+  }
+
+  if (detail && startHeight) {
+    const endHeight = detail.offsetHeight;
+    if (startHeight !== endHeight) {
+      detail.style.height = startHeight + 'px';
+      detail.offsetHeight;
+      const anim = detail.animate(
+        [{ height: startHeight + 'px' }, { height: endHeight + 'px' }],
+        { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' }
+      );
+      detail._rowExpandAnim = anim;
+      anim.finished.then(() => {
+        if (detail._rowExpandAnim !== anim) return;
+        anim.cancel();
+        detail._rowExpandAnim = null;
+        detail.style.height = 'auto';
+      }).catch(() => {});
+    }
+  }
+}
+
 function createHistoryEntryEl(entry) {
   const el = document.createElement('div');
   el.className = 'history-entry';
@@ -4661,13 +4746,13 @@ function createHistoryEntryEl(entry) {
   const detailRows = [];
 
   if (entry.webpageUrl) {
-    detailRows.push({ label: 'Source', value: entry.webpageUrl, copyable: true });
+    detailRows.push({ label: 'Source', value: entry.webpageUrl, copyable: true, expandable: true });
   }
   if (entry.channel || entry.uploader) {
     const channelLabel = (entry.platform === 'instagram' || entry.platform === 'tiktok') ? 'Creator' : 'Channel';
     let channelVal = entry.channel || entry.uploader;
     if (entry.channelUrl) channelVal += ` (${entry.channelUrl})`;
-    detailRows.push({ label: channelLabel, value: channelVal });
+    detailRows.push({ label: channelLabel, value: channelVal, expandable: !!entry.channelUrl });
   }
   if (entry.uploadDate) {
     detailRows.push({ label: 'Uploaded', value: formatUploadDate(entry.uploadDate) });
@@ -4689,16 +4774,16 @@ function createHistoryEntryEl(entry) {
     detailRows.push({ label: 'Likes', value: formatNumber(entry.likeCount) });
   }
   if (entry.categories && entry.categories.length > 0) {
-    detailRows.push({ label: 'Categories', value: entry.categories.join(', ') });
+    detailRows.push({ label: 'Categories', value: entry.categories.join(', '), expandable: true });
   }
   if (entry.tags && entry.tags.length > 0) {
-    detailRows.push({ label: 'Tags', value: entry.tags.join(', ') });
+    detailRows.push({ label: 'Tags', value: entry.tags.join(', '), expandable: true });
   }
   if (entry.license) {
-    detailRows.push({ label: 'License', value: entry.license });
+    detailRows.push({ label: 'License', value: entry.license, expandable: true });
   }
   if (entry.description) {
-    detailRows.push({ label: 'Description', value: entry.description });
+    detailRows.push({ label: 'Description', value: entry.description, expandable: true });
   }
   if (isCarousel) {
     for (let ci = 0; ci < entry.carouselItems.length; ci++) {
@@ -4707,11 +4792,12 @@ function createHistoryEntryEl(entry) {
         label: `File ${ci + 1}`,
         value: child.filePath || '-',
         clickToReveal: !!child.filePath,
+        expandable: !!child.filePath,
       });
     }
     detailRows.push({ label: 'Total Size', value: formatFileSize(entry.fileSize) });
   } else {
-    detailRows.push({ label: 'File', value: entry.filePath || '-', clickToReveal: !!entry.filePath });
+    detailRows.push({ label: 'File', value: entry.filePath || '-', clickToReveal: !!entry.filePath, expandable: !!entry.filePath });
     detailRows.push({ label: 'Size', value: formatFileSize(entry.fileSize) });
   }
   if (entry.project) {
@@ -4724,11 +4810,15 @@ function createHistoryEntryEl(entry) {
     const copyBtn = hasCopy
       ? `<button class="history-copy-row-btn" data-copy-value="${escapeHtml(r.value)}" title="Copy">${icon('copy-01', 'ui-icon')}</button>`
       : '';
+    const expandBtn = r.expandable
+      ? `<button class="history-expand-row-btn" aria-expanded="false" aria-label="Show more">${icon('arrow-down-01', 'ui-icon')}</button>`
+      : '';
     if (r.clickToReveal) {
       const display = truncatePath(r.value);
-      return `<dt>${r.label}</dt><dd class="file-link" data-filepath="${escapeHtml(r.value)}" title="${escapeHtml(r.value)}"><span class="history-dd-text">${escapeHtml(display)}</span>${copyBtn}</dd>`;
+      return `<dt>${r.label}</dt><dd class="file-link${r.expandable ? ' history-dd--expandable' : ''}" data-filepath="${escapeHtml(r.value)}" title="${escapeHtml(r.value)}"><span class="history-dd-text">${escapeHtml(display)}</span>${copyBtn}${expandBtn}</dd>`;
     }
-    return `<dt>${r.label}</dt><dd${r.copyable ? ' class="copyable"' : ''}><span class="history-dd-text">${escapeHtml(r.value)}</span>${copyBtn}</dd>`;
+    const cls = [r.copyable && 'copyable', r.expandable && 'history-dd--expandable'].filter(Boolean).join(' ');
+    return `<dt>${r.label}</dt><dd${cls ? ` class="${cls}"` : ''}><span class="history-dd-text">${escapeHtml(r.value)}</span>${copyBtn}${expandBtn}</dd>`;
   }).join('');
 
   const qualityBadge = isCarousel
@@ -4781,6 +4871,20 @@ function createHistoryEntryEl(entry) {
   function collapse() {
     if (!el.classList.contains('expanded')) return;
     if (expandAnim) { expandAnim.cancel(); expandAnim = null; }
+    if (detail._rowExpandAnim) {
+      detail._rowExpandAnim.cancel();
+      detail._rowExpandAnim = null;
+    }
+    el.querySelectorAll('.history-dd--expanded').forEach(dd => {
+      dd.classList.remove('history-dd--expanded');
+      const btn = dd.querySelector('.history-expand-row-btn');
+      if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('visible'); }
+      if (dd.classList.contains('file-link') && dd.dataset.filepath) {
+        const t = dd.querySelector('.history-dd-text');
+        if (t) t.textContent = truncatePath(dd.dataset.filepath);
+      }
+    });
+    detail.style.height = 'auto';
     detail.classList.add('is-closing');
     el.classList.remove('expanded');
     if (collapseActiveCard === collapse) collapseActiveCard = null;
@@ -4828,13 +4932,22 @@ function createHistoryEntryEl(entry) {
         expandAnim.cancel();
         detail.style.height = 'auto';
         expandAnim = null;
+        revealExpandButtons(el);
       }).catch(() => {});
     }
   });
 
+  el.querySelector('.history-detail-grid').addEventListener('click', (e) => {
+    const expandBtn = e.target.closest('.history-expand-row-btn');
+    if (!expandBtn) return;
+    e.stopPropagation();
+    const dd = expandBtn.closest('dd');
+    if (dd) toggleExpandRow(dd);
+  });
+
   el.querySelectorAll('.file-link').forEach(fileLink => {
     fileLink.addEventListener('click', async (e) => {
-      if (e.target.closest('.history-copy-row-btn')) return;
+      if (e.target.closest('.history-copy-row-btn') || e.target.closest('.history-expand-row-btn')) return;
       e.stopPropagation();
       const fp = fileLink.dataset.filepath;
       if (!fp) return;
@@ -5023,7 +5136,10 @@ function openHistoryDetailModal(entry) {
   backdrop.appendChild(closeBtn);
   historyView.appendChild(backdrop);
 
-  requestAnimationFrame(() => backdrop.classList.add('visible'));
+  requestAnimationFrame(() => {
+    backdrop.classList.add('visible');
+    revealExpandButtons(entryEl);
+  });
 
   function closeModal() {
     backdrop.classList.remove('visible');
@@ -5515,41 +5631,108 @@ async function init() {
   window.addEventListener('resize', () => updatePillPosition(false));
 
   try {
-    const update = await window.api.checkAppUpdate();
-    if (update.available) {
-      appUpdateBtn.style.display = '';
-      appUpdateBtn.textContent = `Update to v${update.version}`;
-      appUpdateBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (update.url) window.api.openExternal(update.url);
-      });
-      showStatus('info', tp('newVersionAvailable', update.version) || `New version v${update.version} available! Check Settings.`);
+    const ytdlpVer = await window.api.getYtdlpVersion();
+    if (ytdlpVer) {
+      engineVersion.textContent = ytdlpVer;
+      engineVersion.style.display = '';
     }
-  } catch { /* no update check errors shown */ }
+  } catch { /* non-fatal */ }
 
-  window.api.onUpdateReady((version) => {
-    showUpdateDialog(version);
-  });
+  setupAppUpdateListener();
+}
+
+/* ============================================================
+   Unified App Update State
+   ============================================================ */
+
+function setupAppUpdateListener() {
+  function handleAppUpdateStatus(data) {
+    if (!data) return;
+    switch (data.status) {
+      case 'checking':
+        checkAppUpdateBtn.classList.add('spinning');
+        break;
+      case 'up-to-date':
+        checkAppUpdateBtn.classList.remove('spinning');
+        checkAppUpdateBtn.disabled = false;
+        break;
+      case 'available':
+        showAppUpdateAvailable(data.version, data.url, 'github');
+        checkAppUpdateBtn.classList.remove('spinning');
+        checkAppUpdateBtn.disabled = false;
+        break;
+      case 'downloading':
+        checkAppUpdateBtn.classList.remove('spinning');
+        break;
+      case 'downloaded':
+        showAppUpdateAvailable(data.version, null, 'squirrel');
+        showUpdateDialog(data.version);
+        checkAppUpdateBtn.classList.remove('spinning');
+        checkAppUpdateBtn.disabled = false;
+        break;
+      case 'error':
+        checkAppUpdateBtn.classList.remove('spinning');
+        checkAppUpdateBtn.disabled = false;
+        break;
+    }
+  }
+
+  window.api.onAppUpdateStatus(handleAppUpdateStatus);
+
+  window.api.getAppUpdateStatus().then(handleAppUpdateStatus).catch(() => {});
+}
+
+function showAppUpdateAvailable(version, url, method) {
+  appUpdateBannerLabel.textContent = `v${version} available`;
+  settingsUpdateDot.style.display = '';
+
+  if (method === 'squirrel') {
+    appUpdateBannerBtn.textContent = 'Restart';
+    appUpdateBannerBtn.onclick = (e) => {
+      e.stopPropagation();
+      window.api.installUpdate();
+    };
+  } else {
+    appUpdateBannerBtn.textContent = 'Download';
+    appUpdateBannerBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (url) window.api.openExternal(url);
+    };
+  }
+
+  appUpdateBanner.style.display = '';
+  showStatus('info', tp('newVersionAvailable', version) || `New version v${version} available. Check Settings.`);
 }
 
 function showUpdateDialog(version) {
-  const existing = document.querySelector('.delete-dialog-overlay.update-dialog');
+  const existing = document.querySelector('.update-dialog-overlay');
   if (existing) return;
 
+  const titles = {
+    unhinged: 'Fresh Update, Fam',
+    professional: 'Update Ready',
+    diabolical: 'UPDATE TIME, CHUMP',
+  };
+  const subtitles = {
+    unhinged: `v${escapeHtml(version)} just downloaded. Restart to apply it.`,
+    professional: `Version ${escapeHtml(version)} has been downloaded and is ready to install.`,
+    diabolical: `v${escapeHtml(version)} JUST DROPPED. RESTART OR STAY OUTDATED, YOUR CALL.`,
+  };
+
   const overlay = document.createElement('div');
-  overlay.className = 'delete-dialog-overlay update-dialog';
+  overlay.className = 'update-dialog-overlay';
 
   overlay.innerHTML = `
-    <div class="delete-dialog" role="dialog" aria-modal="true">
-      <div class="delete-dialog__title">Fresh Update, Fam</div>
-      <div class="delete-dialog__subtitle">v${escapeHtml(version)} just downloaded. Restart to apply it.</div>
-      <div class="delete-dialog__actions">
-        <button class="delete-dialog__btn delete-dialog__btn--danger" data-choice="restart">
-          <span class="delete-dialog__btn-label">Restart and Update</span>
-          <span class="delete-dialog__btn-sub">Takes a few seconds.</span>
+    <div class="update-dialog-panel" role="dialog" aria-modal="true">
+      <div class="update-dialog__title">${titles[state.mode] || titles.unhinged}</div>
+      <div class="update-dialog__subtitle">${subtitles[state.mode] || subtitles.unhinged}</div>
+      <div class="update-dialog__actions">
+        <button class="update-dialog__btn update-dialog__btn--primary" data-choice="restart">
+          <span class="update-dialog__btn-label">Restart and Update</span>
+          <span class="update-dialog__btn-sub">Takes a few seconds.</span>
         </button>
       </div>
-      <button class="delete-dialog__cancel" data-choice="later">Later</button>
+      <button class="update-dialog__cancel" data-choice="later">Later</button>
     </div>
   `;
 
@@ -5571,7 +5754,7 @@ function showUpdateDialog(version) {
       }
       return;
     }
-    if (!e.target.closest('.delete-dialog')) close();
+    if (!e.target.closest('.update-dialog-panel')) close();
   });
 
   const onKey = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); close(); } };

@@ -10,23 +10,46 @@ const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = 
 
 setYtdlpFetcher(fetchInstagramMediaViaYtdlp);
 
+let appUpdateState = { status: 'idle' };
+
+function sendAppUpdateStatus(data) {
+  appUpdateState = data;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app-update-status', data);
+  }
+}
+
 function setupAutoUpdater() {
-  if (!app.isPackaged || process.platform !== 'darwin') return;
+  if (!app.isPackaged || process.platform !== 'darwin') {
+    setupGithubUpdateChecker();
+    return;
+  }
   try {
     const { autoUpdater } = require('electron');
     const feed = `https://update.electronjs.org/Grantosthedev/Youtube-Converter/${process.platform}-${process.arch}/${app.getVersion()}`;
     autoUpdater.setFeedURL({ url: feed });
 
+    autoUpdater.on('checking-for-update', () => {
+      sendAppUpdateStatus({ status: 'checking' });
+    });
+
+    autoUpdater.on('update-available', () => {
+      sendAppUpdateStatus({ status: 'downloading' });
+    });
+
+    autoUpdater.on('update-not-available', () => {
+      sendAppUpdateStatus({ status: 'up-to-date' });
+    });
+
     autoUpdater.on('update-downloaded', (_event, releaseNotes, releaseName) => {
       const ver = (releaseName || '').replace(/^v/, '') || 'new version';
       console.log(`[auto-update] Update downloaded: ${ver}`);
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('update-ready', ver);
-      }
+      sendAppUpdateStatus({ status: 'downloaded', version: ver, method: 'squirrel' });
     });
 
     autoUpdater.on('error', (err) => {
       console.warn('[auto-update] Error:', err.message);
+      sendAppUpdateStatus({ status: 'error', error: err.message });
     });
 
     autoUpdater.checkForUpdates();
@@ -34,7 +57,23 @@ function setupAutoUpdater() {
       try { autoUpdater.checkForUpdates(); } catch { /* ignore */ }
     }, 60 * 60 * 1000);
   } catch (err) {
-    console.warn('[auto-update] disabled:', err.message);
+    console.warn('[auto-update] Squirrel disabled:', err.message);
+    setupGithubUpdateChecker();
+  }
+}
+
+async function setupGithubUpdateChecker() {
+  try {
+    const currentVersion = app.getVersion();
+    sendAppUpdateStatus({ status: 'checking' });
+    const result = await checkAppUpdate(currentVersion);
+    if (result.available) {
+      sendAppUpdateStatus({ status: 'available', version: result.version, url: result.url, method: 'github' });
+    } else {
+      sendAppUpdateStatus({ status: 'up-to-date' });
+    }
+  } catch {
+    sendAppUpdateStatus({ status: 'up-to-date' });
   }
 }
 
@@ -44,6 +83,8 @@ ipcMain.handle('install-update', () => {
     autoUpdater.quitAndInstall();
   } catch { /* ignore in dev */ }
 });
+
+ipcMain.handle('get-app-update-status', () => appUpdateState);
 
 const GOOD_STICKERS = [
   'good14.png', 'good23.png', 'good24.png', 'good25.png', 'good26.png',
@@ -718,11 +759,11 @@ ipcMain.handle('check-app-update', async () => {
     try {
       const { autoUpdater } = require('electron');
       autoUpdater.checkForUpdates();
-      return { available: false, checking: true };
+      return appUpdateState;
     } catch { /* fall through */ }
   }
-  const currentVersion = app.getVersion();
-  return await checkAppUpdate(currentVersion);
+  await setupGithubUpdateChecker();
+  return appUpdateState;
 });
 
 ipcMain.handle('show-notification', async (_event, title, body, filePath, stickerType = 'good') => {

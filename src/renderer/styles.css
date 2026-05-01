@@ -1788,51 +1788,171 @@ html.light-mode .ui-tooltip {
   color: var(--red-dark);
 }
 
-.settings-update-btn {
-  height: 30px;
-  padding: 0 16px;
+/* ---- Settings Update Banner ---- */
+
+.settings-update-banner {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--color-success);
+  color: #000;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  animation: badgePop 300ms var(--spring);
+  margin-bottom: 4px;
+}
+
+.settings-update-banner__text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-update-banner__btn {
+  height: 26px;
+  padding: 0 12px;
+  background: rgba(0, 0, 0, 0.2);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 150ms ease;
+}
+
+.settings-update-banner__btn:hover {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* ---- Settings Gear Dot Indicator ---- */
+
+.settings-btn {
+  position: relative;
+}
+
+.settings-btn__dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success);
+  pointer-events: none;
+  animation: badgePop 300ms var(--spring);
+}
+
+/* ---- Settings About Block ---- */
+
+.settings-about {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.settings-about__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+}
+
+.settings-about__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-about__version {
+  font-size: 12px;
+  color: var(--grey-muted);
+}
+
+.settings-about__engine-ver {
+  font-size: 10px;
+  color: var(--grey-muted);
+  opacity: 0.6;
+  padding-left: 2px;
+}
+
+.settings-about__check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
   background: transparent;
   color: var(--red-bright);
-  border-radius: 8px;
-  font-size: 12px;
+  border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  transition: transform 200ms var(--spring);
+  transition: transform 200ms var(--spring), opacity 200ms ease;
+  opacity: 0.6;
+  padding: 0;
 }
 
-.settings-update-btn:hover {
-  transform: scale(1.02);
+.settings-about__check--text {
+  width: auto;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  gap: 5px;
+  background: rgba(226, 0, 0, 0.12);
+  font-size: 10px;
+  color: var(--red-bright);
+  opacity: 1;
 }
 
-.settings-update-btn:active {
-  transform: scale(0.97);
+.settings-about__check--text:hover {
+  background: rgba(226, 0, 0, 0.18);
 }
 
-.settings-update-btn:disabled {
-  opacity: 0.5;
+.settings-about__check:hover {
+  transform: scale(1.1);
+  opacity: 1;
+}
+
+.settings-about__check:active {
+  transform: scale(0.9);
+}
+
+.settings-about__check:disabled {
+  opacity: 0.3;
   cursor: not-allowed;
   transform: none;
 }
 
-.settings-update-btn.updating {
-  animation: pulse 1.4s var(--ease) infinite;
+.settings-about__check.spinning .ui-icon {
+  animation: spin 800ms linear infinite;
 }
 
-.settings-version {
-  font-size: 12px;
-  color: var(--red-bright);
-  text-align: right;
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
+
+/* ---- Engine Update Spinner ---- */
+
+.settings-about__spinner {
+  animation: spin 800ms linear infinite;
+  color: var(--yellow-bright);
+}
+
+/* ---- Update Status (shared) ---- */
 
 .update-status {
   display: block;
   font-size: 11px;
-  color: rgba(226,0,0,0.55);
-  padding: 0 4px;
-  min-height: 16px;
+  color: var(--grey-muted);
+  padding: 0;
+  min-height: 0;
   transition: opacity 300ms ease;
 }
 
@@ -1846,6 +1966,113 @@ html.light-mode .ui-tooltip {
 
 .update-status.success {
   color: var(--color-success);
+}
+
+/* ---- Update Dialog (standalone, not reusing delete-dialog) ---- */
+
+.update-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 200ms var(--ease);
+  -webkit-app-region: no-drag;
+}
+
+.update-dialog-overlay.visible {
+  opacity: 1;
+}
+
+.update-dialog-panel {
+  width: 320px;
+  background: var(--red-dark);
+  border-radius: var(--radius-card);
+  padding: 24px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  transform: scale(0.92);
+  transition: transform 250ms var(--spring);
+}
+
+.update-dialog-overlay.visible .update-dialog-panel {
+  transform: scale(1);
+}
+
+.update-dialog__title {
+  font-size: 16px;
+  color: var(--white);
+  font-weight: 700;
+}
+
+.update-dialog__subtitle {
+  font-size: 12px;
+  color: var(--grey-muted);
+  line-height: 1.5;
+}
+
+.update-dialog__actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.update-dialog__btn {
+  width: 100%;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: transform 200ms var(--spring);
+}
+
+.update-dialog__btn:hover {
+  transform: scale(1.02);
+}
+
+.update-dialog__btn:active {
+  transform: scale(0.97);
+}
+
+.update-dialog__btn--primary {
+  background: var(--color-success);
+  color: #000;
+}
+
+.update-dialog__btn-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.update-dialog__btn-sub {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.update-dialog__cancel {
+  background: none;
+  border: none;
+  color: var(--grey-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 150ms ease;
+}
+
+.update-dialog__cancel:hover {
+  color: var(--white);
 }
 
 /* ============================================================
@@ -2177,11 +2404,6 @@ html.light-mode .ui-tooltip {
   transform: scale(0.97);
 }
 
-.settings-app-update {
-  background: var(--color-success);
-  color: #000;
-  animation: badgePop 300ms var(--spring);
-}
 
 /* ============================================================
    History View — Full-screen overlay (sits outside .app)
@@ -2705,6 +2927,74 @@ html.light-mode .ui-tooltip {
 .history-copy-row-btn--empty {
   pointer-events: none;
   cursor: default;
+}
+
+/* ---- Expandable detail rows ---- */
+
+.history-expand-row-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--red-bright);
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  opacity: 0.35;
+  transition:
+    opacity 150ms var(--ease),
+    background 150ms var(--ease),
+    color 150ms var(--ease),
+    transform 200ms var(--spring);
+  border: none;
+  padding: 0;
+}
+
+.history-expand-row-btn.visible {
+  display: flex;
+}
+
+.history-expand-row-btn:hover {
+  opacity: 1;
+  background: rgba(255,255,255,0.08);
+  color: var(--white);
+  transform: scale(1.1);
+}
+
+.history-expand-row-btn:active {
+  transform: scale(0.9);
+}
+
+.history-expand-row-btn[aria-expanded="true"] {
+  transform: rotate(180deg);
+}
+
+.history-expand-row-btn[aria-expanded="true"]:hover {
+  transform: rotate(180deg) scale(1.1);
+}
+
+.history-expand-row-btn[aria-expanded="true"]:active {
+  transform: rotate(180deg) scale(0.9);
+}
+
+.history-dd--expanded .history-dd-text {
+  white-space: normal;
+  word-break: break-word;
+  text-overflow: clip;
+  overflow: visible;
+}
+
+.history-dd--expanded {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.history-detail-grid dt:has(+ .history-dd--expanded) {
+  align-self: start;
+  padding-top: 2px;
 }
 
 .history-detail-grid dd.muted {
@@ -4158,7 +4448,19 @@ html.light-mode {
 
 /* ---- White text that now sits on the pink containers ---- */
 html.light-mode .settings-label { color: var(--red-bright); }
-html.light-mode .settings-version { color: var(--red-bright); }
+html.light-mode .settings-about__version { color: var(--red-bright); }
+html.light-mode .settings-about__label { color: var(--grey-muted); }
+html.light-mode .settings-about__check { color: var(--red-bright); }
+html.light-mode .settings-about__check--text { background: rgba(0, 0, 0, 0.07); }
+html.light-mode .settings-about__check--text:hover { background: rgba(0, 0, 0, 0.11); }
+html.light-mode .settings-update-banner { background: var(--color-success); color: #111; }
+html.light-mode .settings-update-banner__btn { background: rgba(0, 0, 0, 0.15); color: #111; }
+html.light-mode .update-dialog-panel { background: var(--red-dark); }
+html.light-mode .update-dialog__title { color: #111; }
+html.light-mode .update-dialog__subtitle { color: var(--grey-muted); }
+html.light-mode .update-dialog__cancel { color: var(--grey-muted); }
+html.light-mode .update-dialog__cancel:hover { color: #111; }
+html.light-mode .settings-btn__dot { background: var(--color-success); }
 html.light-mode .queue-panel__title { color: var(--red-bright); }
 html.light-mode .queue-panel__clear { color: var(--red-bright); }
 html.light-mode .queue-panel__clear:hover {
@@ -4555,6 +4857,15 @@ html.light-mode .history-detail-grid dd.file-link.missing {
 }
 
 html.light-mode .history-copy-row-btn:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: #111111;
+}
+
+html.light-mode .history-expand-row-btn {
+  color: var(--proj-light-text, var(--red-bright));
+}
+
+html.light-mode .history-expand-row-btn:hover {
   background: rgba(0, 0, 0, 0.07);
   color: #111111;
 }
