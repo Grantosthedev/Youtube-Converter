@@ -10,3 +10,4 @@ bin/
 *.key
 *.cert
 credentials.json
+RELEASE_NOTES.md

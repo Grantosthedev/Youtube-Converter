@@ -9,6 +9,7 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
+    "postpublish": "node scripts/set-release-notes.js",
     "postinstall": "node scripts/download-ytdlp.js"
   },
   "author": "Grantosthedev",

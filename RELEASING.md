@@ -6,12 +6,15 @@ How to push updates to all Downroad users.
 
 ```bash
 # 1. Bump version in package.json
-# 2. Build, sign, notarize, publish
+# 2. Write release notes
+#    Edit RELEASE_NOTES.md (gitignored — rewrite it each release)
+# 3. Build, sign, notarize, publish, and auto-fill notes
 npm run publish
-# 3. Go to GitHub Releases, find the draft, click "Publish release"
+# 4. Go to GitHub Releases, find the draft, click "Publish release"
 ```
 
-That's it. Users get prompted to restart within 6 hours (or immediately via the Settings gear).
+That's it. Notes are auto-pushed to the GitHub draft by the `postpublish` script.
+Users get prompted to restart within 6 hours (or immediately via the Settings gear).
 
 ## Step by Step
 
@@ -23,7 +26,11 @@ Open `package.json` and increment the `version` field following semver:
 - New feature: `1.3.0` -> `1.4.0`
 - Breaking change: `1.3.0` -> `2.0.0`
 
-### 2. Build and publish
+### 2. Write release notes
+
+Edit `RELEASE_NOTES.md` in the project root (it's gitignored). Write whatever you want users to see on the GitHub release page. Markdown is supported.
+
+### 3. Build and publish
 
 ```bash
 npm run publish
@@ -35,8 +42,9 @@ This does everything in one command:
 - Notarizes with Apple (takes 1-2 min)
 - Creates a ZIP (for auto-updates) and DMG (for manual installs)
 - Uploads both to a draft GitHub Release tagged with the version
+- Automatically pushes your `RELEASE_NOTES.md` to the draft release body
 
-### 3. Publish the GitHub Release
+### 4. Publish the GitHub Release
 
 1. Go to https://github.com/Grantosthedev/Youtube-Converter/releases
 2. Find the draft release (e.g. `v1.3.1`)
