@@ -11,7 +11,7 @@ npm run publish
 # 3. Go to GitHub Releases, find the draft, click "Publish release"
 ```
 
-That's it. Users get prompted to restart within an hour.
+That's it. Users get prompted to restart within 6 hours (or immediately via the Settings gear).
 
 ## Step by Step
 
@@ -45,10 +45,12 @@ This does everything in one command:
 
 ### 4. Users get updated
 
-- Installed apps check `update.electronjs.org` every hour
+- Installed apps check `update.electronjs.org` on launch and every 6 hours
 - When a new version is found, it downloads in the background
-- A dialog appears: "Fresh Update, Fam" with **Restart and Update** or **Later**
+- A persistent toast appears: "vX.Y.Z is ready" with an **Update** button and a dismiss X
+- Clicking **Update** shows the "Fresh Update, Fam" confirm dialog: **Restart and Update** or **Later**
 - On restart, the update is applied
+- Users can also trigger a manual check via the **Check Updates** button in Settings
 
 ## Prerequisites (one-time setup)
 
