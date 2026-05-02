@@ -63,18 +63,22 @@ function setupAutoUpdater() {
 }
 
 async function setupGithubUpdateChecker() {
-  try {
-    const currentVersion = app.getVersion();
-    sendAppUpdateStatus({ status: 'checking' });
-    const result = await checkAppUpdate(currentVersion);
-    if (result.available) {
-      sendAppUpdateStatus({ status: 'available', version: result.version, url: result.url, method: 'github' });
-    } else {
+  const check = async () => {
+    try {
+      const currentVersion = app.getVersion();
+      sendAppUpdateStatus({ status: 'checking' });
+      const result = await checkAppUpdate(currentVersion);
+      if (result.available) {
+        sendAppUpdateStatus({ status: 'available', version: result.version, url: result.url, method: 'github' });
+      } else {
+        sendAppUpdateStatus({ status: 'up-to-date' });
+      }
+    } catch {
       sendAppUpdateStatus({ status: 'up-to-date' });
     }
-  } catch {
-    sendAppUpdateStatus({ status: 'up-to-date' });
-  }
+  };
+  await check();
+  setInterval(check, 6 * 60 * 60 * 1000);
 }
 
 ipcMain.handle('install-update', () => {
