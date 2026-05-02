@@ -115,6 +115,8 @@ const carouselCount = $('#carouselCount');
 const carouselFooter = carouselCard.querySelector('.carousel-card__footer');
 const statusRetry = $('#statusRetry');
 const statusCopy = $('#statusCopy');
+const statusUpdateBtn = $('#statusUpdateBtn');
+const statusDismissBtn = $('#statusDismissBtn');
 const btnHint = $('#btnHint');
 const projectBtn = $('#projectBtn');
 const projectPill = $('#projectPill');
@@ -1827,6 +1829,8 @@ function showStatus(type, message, customIcon) {
   statusMessage.className = `status-message ${type}`;
   statusIcon.innerHTML = iconName ? icon(iconName, 'ui-icon') : '';
   statusText.textContent = message;
+  statusUpdateBtn.style.display = 'none';
+  statusDismissBtn.style.display = 'none';
   if (type === 'error') {
     statusCopy.style.display = '';
   } else {
@@ -1852,6 +1856,8 @@ function hideStatus() {
   statusMessage.classList.remove('visible');
   statusCopy.style.display = 'none';
   statusRetry.style.display = 'none';
+  statusUpdateBtn.style.display = 'none';
+  statusDismissBtn.style.display = 'none';
 }
 
 statusCopy.addEventListener('click', async () => {
@@ -5683,6 +5689,7 @@ function setupAppUpdateListener() {
 }
 
 function showAppUpdateAvailable(version, url, method) {
+  // Settings banner + gear dot
   appUpdateBannerLabel.textContent = `v${version} available`;
   settingsUpdateDot.style.display = '';
 
@@ -5699,9 +5706,31 @@ function showAppUpdateAvailable(version, url, method) {
       if (url) window.api.openExternal(url);
     };
   }
-
   appUpdateBanner.style.display = '';
-  showStatus('info', tp('newVersionAvailable', version) || `New version v${version} available. Check Settings.`);
+
+  // Persistent update toast — stays until acted on or dismissed
+  clearTimeout(statusHideTimer);
+  statusMessage.className = 'status-message update';
+  statusIcon.innerHTML = icon('arrow-up-03', 'ui-icon');
+  statusText.textContent = `v${version} is ready`;
+  statusCopy.style.display = 'none';
+  statusRetry.style.display = 'none';
+
+  statusUpdateBtn.style.display = '';
+  statusUpdateBtn.onclick = () => {
+    hideStatus();
+    if (method === 'squirrel') {
+      showUpdateDialog(version);
+    } else if (url) {
+      window.api.openExternal(url);
+    }
+  };
+
+  statusDismissBtn.style.display = '';
+  statusDismissBtn.onclick = () => hideStatus();
+
+  requestAnimationFrame(() => statusMessage.classList.add('visible'));
+  // No auto-hide timer — toast persists until user acts or dismisses
 }
 
 function showUpdateDialog(version) {

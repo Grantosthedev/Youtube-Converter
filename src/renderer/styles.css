@@ -2207,6 +2207,7 @@ html.light-mode .ui-tooltip {
 .status-message.success { background: #0a2e15; color: var(--color-success); }
 .status-message.warning { background: #2e2500; color: var(--color-warning); }
 .status-message.info    { background: #1a1a2e; color: var(--color-info); }
+.status-message.update  { background: var(--red-dark); color: var(--red-bright); }
 
 .status-message__icon {
   flex-shrink: 0;
@@ -2250,6 +2251,43 @@ html.light-mode .ui-tooltip {
 
 .status-action-btn .ui-icon {
   font-size: 12px;
+}
+
+/* Update toast action button inherits brand colour from .update class */
+.status-message.update .status-action-btn {
+  color: var(--red-bright);
+  border-color: rgba(226,0,0,0.35);
+}
+
+.status-message.update .status-action-btn:hover {
+  background: rgba(226,0,0,0.15);
+}
+
+.status-dismiss-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: currentColor;
+  opacity: 0.45;
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+  -webkit-app-region: no-drag;
+  transition: opacity 150ms var(--ease), transform 150ms var(--spring);
+}
+
+.status-dismiss-btn:hover {
+  opacity: 1;
+}
+
+.status-dismiss-btn:active {
+  transform: scale(0.88);
 }
 
 /* ============================================================
@@ -4532,6 +4570,9 @@ html.light-mode .status-message.error   { background: rgba(255,  69, 58, 0.12); 
 html.light-mode .status-message.success { background: rgba( 48, 209, 88, 0.12); color: hsl(140, 65%, 22%); }
 html.light-mode .status-message.warning { background: rgba(255, 214, 10, 0.14); color: hsl( 38, 100%, 25%); }
 html.light-mode .status-message.info    { background: rgba(  0,   0,  0, 0.07); color: #111111; }
+html.light-mode .status-message.update  { background: var(--red-dark); color: var(--proj-light-text, var(--red-bright)); }
+html.light-mode .status-message.update .status-action-btn { color: var(--proj-light-text, var(--red-bright)); border-color: color-mix(in srgb, var(--proj-light-text, var(--red-bright)) 35%, transparent); }
+html.light-mode .status-message.update .status-action-btn:hover { background: rgba(0,0,0,0.08); }
 
 /* URL row border: white is invisible on a light vibrancy bg */
 html.light-mode .url-row {

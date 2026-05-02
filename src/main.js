@@ -55,7 +55,7 @@ function setupAutoUpdater() {
     autoUpdater.checkForUpdates();
     setInterval(() => {
       try { autoUpdater.checkForUpdates(); } catch { /* ignore */ }
-    }, 60 * 60 * 1000);
+    }, 6 * 60 * 60 * 1000);
   } catch (err) {
     console.warn('[auto-update] Squirrel disabled:', err.message);
     setupGithubUpdateChecker();
