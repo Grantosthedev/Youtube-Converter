@@ -11,6 +11,7 @@ const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = 
 setYtdlpFetcher(fetchInstagramMediaViaYtdlp);
 
 let appUpdateState = { status: 'idle' };
+let githubUpdateIntervalStarted = false;
 
 function sendAppUpdateStatus(data) {
   appUpdateState = data;
@@ -78,7 +79,10 @@ async function setupGithubUpdateChecker() {
     }
   };
   await check();
-  setInterval(check, 6 * 60 * 60 * 1000);
+  if (!githubUpdateIntervalStarted) {
+    githubUpdateIntervalStarted = true;
+    setInterval(check, 6 * 60 * 60 * 1000);
+  }
 }
 
 ipcMain.handle('install-update', () => {

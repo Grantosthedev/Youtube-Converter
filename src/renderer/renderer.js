@@ -3869,17 +3869,26 @@ updateEngineBtn.addEventListener('click', async (e) => {
   }
 });
 
+let appUpdateCheckUserTriggered = false;
+const checkAppUpdateBtnLabel = checkAppUpdateBtn.querySelector('span');
+
+function setCheckUpdateBtnIdle() {
+  appUpdateCheckUserTriggered = false;
+  checkAppUpdateBtn.disabled = false;
+  checkAppUpdateBtn.classList.remove('spinning');
+  if (checkAppUpdateBtnLabel) checkAppUpdateBtnLabel.textContent = 'Check Updates';
+}
+
 checkAppUpdateBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
+  appUpdateCheckUserTriggered = true;
   checkAppUpdateBtn.disabled = true;
   checkAppUpdateBtn.classList.add('spinning');
+  if (checkAppUpdateBtnLabel) checkAppUpdateBtnLabel.textContent = 'Checking...';
   try {
     await window.api.checkAppUpdate();
   } catch { /* errors handled via status channel */ }
-  setTimeout(() => {
-    checkAppUpdateBtn.disabled = false;
-    checkAppUpdateBtn.classList.remove('spinning');
-  }, 2000);
+  setTimeout(setCheckUpdateBtnIdle, 2000);
 });
 
 /* ============================================================
@@ -5657,28 +5666,37 @@ function setupAppUpdateListener() {
     switch (data.status) {
       case 'checking':
         checkAppUpdateBtn.classList.add('spinning');
+        checkAppUpdateBtn.disabled = true;
+        if (checkAppUpdateBtnLabel) checkAppUpdateBtnLabel.textContent = 'Checking...';
+        if (appUpdateCheckUserTriggered) showActivityToast('Checking for updates...');
         break;
       case 'up-to-date':
-        checkAppUpdateBtn.classList.remove('spinning');
-        checkAppUpdateBtn.disabled = false;
+        setCheckUpdateBtnIdle();
+        if (appUpdateCheckUserTriggered) {
+          completeActivityToast('Already on the latest. You good.');
+          showStatus('success', 'Already on the latest version. You good.');
+        }
         break;
       case 'available':
         showAppUpdateAvailable(data.version, data.url, 'github');
-        checkAppUpdateBtn.classList.remove('spinning');
-        checkAppUpdateBtn.disabled = false;
+        setCheckUpdateBtnIdle();
+        if (appUpdateCheckUserTriggered) completeActivityToast('Update found.');
         break;
       case 'downloading':
         checkAppUpdateBtn.classList.remove('spinning');
+        if (checkAppUpdateBtnLabel) checkAppUpdateBtnLabel.textContent = 'Check Updates';
         break;
       case 'downloaded':
         showAppUpdateAvailable(data.version, null, 'squirrel');
         showUpdateDialog(data.version);
-        checkAppUpdateBtn.classList.remove('spinning');
-        checkAppUpdateBtn.disabled = false;
+        setCheckUpdateBtnIdle();
         break;
       case 'error':
-        checkAppUpdateBtn.classList.remove('spinning');
-        checkAppUpdateBtn.disabled = false;
+        setCheckUpdateBtnIdle();
+        if (appUpdateCheckUserTriggered) {
+          hideActivityToast();
+          showStatus('error', 'Update check failed. Check your connection and try again.');
+        }
         break;
     }
   }
