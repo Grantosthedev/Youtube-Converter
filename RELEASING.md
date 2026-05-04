@@ -16,6 +16,15 @@ npm run publish
 That's it. Notes are auto-pushed to the GitHub draft by the `postpublish` script.
 Users get prompted to restart within 6 hours (or immediately via the Settings gear).
 
+> **DMG build fails?** macOS 15 (Sequoia) blocks `cp -R` when copying a Hardened
+> Runtime `.app` into a mounted disk image from restricted terminals. Fix: run
+> `npm run publish` from **Terminal.app** (not Cursor's terminal) after granting
+> it **Full Disk Access** in System Settings → Privacy & Security → Full Disk Access.
+> Alternatively, publish with ZIP only (sufficient for auto-updates):
+> ```bash
+> npx electron-forge publish --targets @electron-forge/maker-zip && node scripts/set-release-notes.js
+> ```
+
 ## Step by Step
 
 ### 1. Bump the version
