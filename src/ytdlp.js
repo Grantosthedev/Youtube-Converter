@@ -2,6 +2,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const { getYtdlpPath, getFfmpegPath, sanitizeFilename, normalizeInstagramURL } = require('./utils');
+const { reportError } = require('./sentry-report');
 const path = require('path');
 
 // Remove stale PyInstaller temp dirs (_MEI*) that accumulate when yt-dlp is
@@ -64,6 +65,15 @@ function mapError(stderr) {
   }
 
   return 'An unexpected error occurred. Try updating yt-dlp in Settings, or check your connection.';
+}
+
+function reportYtdlpFailure(error, { phase, platform, quality, stderr } = {}) {
+  reportError(error, {
+    phase,
+    platform,
+    quality,
+    details: stderr ? { stderr: String(stderr).slice(-2000) } : undefined,
+  });
 }
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'mkv', 'm4v']);
@@ -132,7 +142,9 @@ function fetchVideoInfo(url, platform) {
         return;
       }
       if (code !== 0) {
-        reject(new Error(mapError(stderr)));
+        const error = new Error(mapError(stderr));
+        reportYtdlpFailure(error, { phase: 'fetch-info', platform, stderr });
+        reject(error);
         return;
       }
       try {
@@ -170,13 +182,16 @@ function fetchVideoInfo(url, platform) {
           estimatedFileSize,
         });
       } catch (e) {
+        reportYtdlpFailure(e, { phase: 'parse-info', platform });
         reject(new Error('Failed to parse video information.'));
       }
     });
 
     proc.on('error', (err) => {
       clearTimeout(timer);
-      reject(new Error(`Failed to run yt-dlp: ${err.message}`));
+      const error = new Error(`Failed to run yt-dlp: ${err.message}`);
+      reportYtdlpFailure(error, { phase: 'spawn-fetch-info', platform });
+      reject(error);
     });
   });
 }
@@ -572,13 +587,26 @@ function startDownload(options, onProgress, onComplete, onError) {
         onComplete(filePath);
       }
     } else {
-      onError(mapError(stderrBuf));
+      const error = new Error(mapError(stderrBuf));
+      reportYtdlpFailure(error, {
+        phase: 'download',
+        platform: options.platform,
+        quality: options.quality,
+        stderr: stderrBuf,
+      });
+      onError(error.message);
     }
   });
 
   proc.on('error', (err) => {
     clearInterval(heartbeat);
-    onError(`Failed to run yt-dlp: ${err.message}`);
+    const error = new Error(`Failed to run yt-dlp: ${err.message}`);
+    reportYtdlpFailure(error, {
+      phase: 'spawn-download',
+      platform: options.platform,
+      quality: options.quality,
+    });
+    onError(error.message);
   });
 
   return proc;
@@ -607,6 +635,8 @@ function fetchCarouselVideos(url) {
 
     proc.on('close', (code) => {
       if (code !== 0) {
+        const error = new Error(mapError(stderr));
+        reportYtdlpFailure(error, { phase: 'fetch-carousel', platform: 'instagram', stderr });
         resolve([]);
         return;
       }
@@ -633,12 +663,16 @@ function fetchCarouselVideos(url) {
         }
 
         resolve(items);
-      } catch {
+      } catch (error) {
+        reportYtdlpFailure(error, { phase: 'parse-carousel', platform: 'instagram' });
         resolve([]);
       }
     });
 
-    proc.on('error', () => resolve([]));
+    proc.on('error', (error) => {
+      reportYtdlpFailure(error, { phase: 'spawn-carousel', platform: 'instagram' });
+      resolve([]);
+    });
   });
 }
 
@@ -673,6 +707,10 @@ function fetchInstagramMediaViaYtdlp(url) {
     proc.on('close', (code) => {
       clearTimeout(timer);
       if (killed || code !== 0) {
+        if (code !== 0) {
+          const error = new Error(mapError(stderr));
+          reportYtdlpFailure(error, { phase: 'fetch-instagram-fallback', platform: 'instagram', stderr });
+        }
         resolve(null);
         return;
       }
@@ -722,13 +760,15 @@ function fetchInstagramMediaViaYtdlp(url) {
           items,
           _fromYtdlp: true,
         });
-      } catch {
+      } catch (error) {
+        reportYtdlpFailure(error, { phase: 'parse-instagram-fallback', platform: 'instagram' });
         resolve(null);
       }
     });
 
-    proc.on('error', () => {
+    proc.on('error', (error) => {
       clearTimeout(timer);
+      reportYtdlpFailure(error, { phase: 'spawn-instagram-fallback', platform: 'instagram' });
       resolve(null);
     });
   });

@@ -1,7 +1,7 @@
 {
   "name": "downroad",
   "productName": "Downroad",
-  "version": "1.4.6",
+  "version": "1.5.0",
   "description": "Download videos and images from YouTube, Instagram, and TikTok. Set in/out points, choose quality, and download clips without fetching the full video.",
   "main": "src/main.js",
   "scripts": {
@@ -11,6 +11,9 @@
     "publish": "electron-forge publish",
     "postpublish": "node scripts/set-release-notes.js",
     "build:sentry": "node scripts/build-sentry-renderer.js",
+    "test": "node --test",
+    "check": "node scripts/check-js.js",
+    "verify": "npm run build:sentry && npm run check && npm test",
     "postinstall": "node scripts/download-ytdlp.js && node scripts/build-sentry-renderer.js"
   },
   "author": "Grantosthedev",
