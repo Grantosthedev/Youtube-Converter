@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const Store = require('electron-store');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp } = require('./ytdlp');
 const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, ensureYtdlpFresh } = require('./updater');
-const { isValidURL, detectPlatform, normalizeYouTubeURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
+const { isValidURL, detectPlatform, normalizeYouTubeURL, normalizeInstagramURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = require('./media-fetcher');
 
 setYtdlpFetcher(fetchInstagramMediaViaYtdlp);
@@ -286,8 +286,13 @@ ipcMain.handle('fetch-video-info', async (_event, url) => {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
   const platform = detectPlatform(url);
-  const cacheKey = platform === 'youtube' ? normalizeYouTubeURL(url) : url.trim();
-  const fetchUrl = platform === 'youtube' ? normalizeYouTubeURL(url) : url.trim();
+  const normalizedUrl = platform === 'youtube'
+    ? normalizeYouTubeURL(url)
+    : platform === 'instagram'
+      ? normalizeInstagramURL(url)
+      : url.trim();
+  const cacheKey = normalizedUrl;
+  const fetchUrl = normalizedUrl;
 
   const info = await fetchVideoInfo(fetchUrl, platform);
 
@@ -352,7 +357,11 @@ ipcMain.handle('start-download', async (event, options) => {
   }
 
   const downloadId = crypto.randomUUID();
-  const downloadUrl = platform === 'youtube' ? normalizeYouTubeURL(options.url) : options.url.trim();
+  const downloadUrl = platform === 'youtube'
+    ? normalizeYouTubeURL(options.url)
+    : platform === 'instagram'
+      ? normalizeInstagramURL(options.url)
+      : options.url.trim();
 
   const downloadOptions = {
     url: downloadUrl,

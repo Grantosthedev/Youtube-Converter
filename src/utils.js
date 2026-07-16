@@ -40,6 +40,19 @@ function normalizeYouTubeURL(url) {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
+function normalizeInstagramURL(url) {
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    if (!/(^|\.)instagram\.com$/i.test(parsed.hostname)) return trimmed;
+    parsed.hostname = 'www.instagram.com';
+    parsed.pathname = parsed.pathname.replace(/^\/reels\//i, '/reel/');
+    return parsed.toString();
+  } catch {
+    return trimmed.replace(/(instagram\.com\/)reels\//i, '$1reel/');
+  }
+}
+
 function sanitizeFilename(name) {
   let safe = name
     .replace(/[\x00-\x1f\x7f]/g, '')
@@ -143,6 +156,7 @@ module.exports = {
   isTiktokPhotoUrl,
   extractVideoId,
   normalizeYouTubeURL,
+  normalizeInstagramURL,
   sanitizeFilename,
   getYtdlpPath,
   getBundledYtdlpPath,

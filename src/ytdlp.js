@@ -1,7 +1,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
-const { getYtdlpPath, getFfmpegPath, sanitizeFilename } = require('./utils');
+const { getYtdlpPath, getFfmpegPath, sanitizeFilename, normalizeInstagramURL } = require('./utils');
 const path = require('path');
 
 // Remove stale PyInstaller temp dirs (_MEI*) that accumulate when yt-dlp is
@@ -66,17 +66,47 @@ function mapError(stderr) {
   return 'An unexpected error occurred. Try updating yt-dlp in Settings, or check your connection.';
 }
 
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'mkv', 'm4v']);
+
+function formatHasVideo(format) {
+  if (!format || typeof format !== 'object') return false;
+  if (format.vcodec && format.vcodec !== 'none') return true;
+  if (format.video_ext && format.video_ext !== 'none') return true;
+  const ext = String(format.ext || '').toLowerCase();
+  return VIDEO_EXTENSIONS.has(ext) && format.acodec !== 'none';
+}
+
+function isInstagramReelUrl(url) {
+  return /instagram\.com\/(?:reel|reels|tv)\//i.test(url);
+}
+
+function detectMediaType(info, platform, url) {
+  if (platform === 'youtube') return 'video';
+  if (!info || typeof info !== 'object') return 'image';
+  if (typeof info.duration === 'number' && info.duration > 0) return 'video';
+  if (platform === 'instagram' && isInstagramReelUrl(url)) return 'video';
+
+  const candidateFormats = [
+    info,
+    ...(Array.isArray(info.requested_formats) ? info.requested_formats : []),
+    ...(Array.isArray(info.formats) ? info.formats : []),
+  ];
+
+  return candidateFormats.some(formatHasVideo) ? 'video' : 'image';
+}
+
 function fetchVideoInfo(url, platform) {
   return new Promise((resolve, reject) => {
     const ytdlp = getYtdlpPath();
     const ffmpeg = getFfmpegPath();
+    const fetchUrl = platform === 'instagram' ? normalizeInstagramURL(url) : url;
 
     const args = [
       '--dump-json',
       '--no-warnings',
       '--no-playlist',
       '--ffmpeg-location', path.dirname(ffmpeg),
-      url,
+      fetchUrl,
     ];
 
     cleanStaleYtdlpTemp();
@@ -136,7 +166,7 @@ function fetchVideoInfo(url, platform) {
           tags: (info.tags || []).slice(0, 10),
           license: info.license || '',
           platform: platform || 'youtube',
-          mediaType: (info.duration === 0 || info.duration === null) && platform !== 'youtube' ? 'image' : 'video',
+          mediaType: detectMediaType(info, platform, fetchUrl),
           estimatedFileSize,
         });
       } catch (e) {
@@ -244,7 +274,7 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
     }
   }
 
-  args.push(url);
+  args.push(platform === 'instagram' ? normalizeInstagramURL(url) : url);
   return args;
 }
 
@@ -558,12 +588,13 @@ function fetchCarouselVideos(url) {
   return new Promise((resolve) => {
     const ytdlp = getYtdlpPath();
     const ffmpeg = getFfmpegPath();
+    const fetchUrl = normalizeInstagramURL(url);
 
     const args = [
       '--dump-json',
       '--no-warnings',
       '--ffmpeg-location', path.dirname(ffmpeg),
-      url,
+      fetchUrl,
     ];
 
     cleanStaleYtdlpTemp();
@@ -589,7 +620,7 @@ function fetchCarouselVideos(url) {
             const videoUrl = info.url || '';
             const thumbnail = info.thumbnail || info.thumbnails?.[info.thumbnails.length - 1]?.url || '';
 
-            if (videoUrl && info.duration > 0) {
+            if (videoUrl && detectMediaType(info, 'instagram', fetchUrl) === 'video') {
               items.push({
                 type: 'video',
                 url: videoUrl,
@@ -615,12 +646,13 @@ function fetchInstagramMediaViaYtdlp(url) {
   return new Promise((resolve) => {
     const ytdlp = getYtdlpPath();
     const ffmpeg = getFfmpegPath();
+    const fetchUrl = normalizeInstagramURL(url);
 
     const args = [
       '--dump-json',
       '--no-warnings',
       '--ffmpeg-location', path.dirname(ffmpeg),
-      url,
+      fetchUrl,
     ];
 
     cleanStaleYtdlpTemp();
@@ -661,7 +693,7 @@ function fetchInstagramMediaViaYtdlp(url) {
               timestamp = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
             }
 
-            const isVideo = (info.duration && info.duration > 0) || info.vcodec !== 'none';
+            const isVideo = detectMediaType(info, 'instagram', fetchUrl) === 'video';
             const thumb = info.thumbnail || info.thumbnails?.[info.thumbnails.length - 1]?.url || '';
             const mediaUrl = info.url || '';
 
