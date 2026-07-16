@@ -282,6 +282,32 @@ async function updateYtdlp() {
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+async function checkYtdlpUpdate() {
+  try {
+    const current = await getCurrentYtdlpVersion();
+    if (!current) {
+      console.log('[updater] yt-dlp version unknown, attempting update...');
+      return await updateYtdlp();
+    }
+
+    const latest = await getLatestYtdlpVersion();
+    if (!latest) return { success: true, version: current, skipped: true };
+
+    const currentClean = current.replace(/[^0-9.]/g, '');
+    const latestClean = latest.replace(/[^0-9.]/g, '');
+
+    if (isNewerVersion(latestClean, currentClean)) {
+      console.log(`[updater] yt-dlp outdated (${current} → ${latest}), updating...`);
+      return await updateYtdlp();
+    }
+
+    return { success: true, version: current, skipped: true };
+  } catch (err) {
+    console.error('[updater] yt-dlp update check failed:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 async function ensureYtdlpFresh(store) {
   try {
     if (store) {
@@ -333,7 +359,11 @@ function isNewerVersion(latest, current) {
 async function checkAppUpdate(currentVersion) {
   try {
     const release = await githubGet(APP_REPO_API);
-    const latestVersion = release.tag_name.replace(/^v/, '').trim();
+    const tag = release?.tag_name;
+    if (!tag) {
+      return { available: false, error: 'No release info returned' };
+    }
+    const latestVersion = tag.replace(/^v/, '').trim();
     if (isNewerVersion(latestVersion, currentVersion)) {
       return {
         available: true,
@@ -342,8 +372,8 @@ async function checkAppUpdate(currentVersion) {
       };
     }
     return { available: false };
-  } catch {
-    return { available: false };
+  } catch (err) {
+    return { available: false, error: err.message || 'Update check failed' };
   }
 }
 
@@ -352,6 +382,7 @@ module.exports = {
   getCurrentYtdlpVersion,
   initializeYtdlp,
   updateYtdlp,
+  checkYtdlpUpdate,
   ensureYtdlpFresh,
   checkAppUpdate,
 };

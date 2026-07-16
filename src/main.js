@@ -4,7 +4,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Store = require('electron-store');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp } = require('./ytdlp');
-const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, ensureYtdlpFresh } = require('./updater');
+const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, checkYtdlpUpdate, ensureYtdlpFresh } = require('./updater');
 const { isValidURL, detectPlatform, normalizeYouTubeURL, normalizeInstagramURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = require('./media-fetcher');
 
@@ -12,6 +12,8 @@ setYtdlpFetcher(fetchInstagramMediaViaYtdlp);
 
 let appUpdateState = { status: 'idle' };
 let githubUpdateIntervalStarted = false;
+let activeGithubCheck = null;
+let squirrelUpdater = null;
 
 function sendAppUpdateStatus(data) {
   appUpdateState = data;
@@ -27,6 +29,7 @@ function setupAutoUpdater() {
   }
   try {
     const { autoUpdater } = require('electron');
+    squirrelUpdater = autoUpdater;
     const feed = `https://update.electronjs.org/Grantosthedev/Youtube-Converter/${process.platform}-${process.arch}/${app.getVersion()}`;
     autoUpdater.setFeedURL({ url: feed });
 
@@ -39,6 +42,8 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('update-not-available', () => {
+      // Don't clobber a ready-to-install update with a later background check.
+      if (appUpdateState.status === 'downloaded') return;
       sendAppUpdateStatus({ status: 'up-to-date' });
     });
 
@@ -50,6 +55,7 @@ function setupAutoUpdater() {
 
     autoUpdater.on('error', (err) => {
       console.warn('[auto-update] Error:', err.message);
+      if (appUpdateState.status === 'downloaded') return;
       sendAppUpdateStatus({ status: 'error', error: err.message });
     });
 
@@ -63,33 +69,69 @@ function setupAutoUpdater() {
   }
 }
 
-async function setupGithubUpdateChecker() {
-  const check = async () => {
-    try {
-      const currentVersion = app.getVersion();
-      sendAppUpdateStatus({ status: 'checking' });
-      const result = await checkAppUpdate(currentVersion);
-      if (result.available) {
-        sendAppUpdateStatus({ status: 'available', version: result.version, url: result.url, method: 'github' });
-      } else {
-        sendAppUpdateStatus({ status: 'up-to-date' });
-      }
-    } catch {
+async function runGithubUpdateCheck({ force = false } = {}) {
+  if (activeGithubCheck) {
+    if (!force) return activeGithubCheck;
+    try { await activeGithubCheck; } catch { /* start fresh below */ }
+  }
+
+  if (!force && (appUpdateState.status === 'available' || appUpdateState.status === 'downloaded')) {
+    sendAppUpdateStatus(appUpdateState);
+    return appUpdateState;
+  }
+
+  const run = async () => {
+    const currentVersion = app.getVersion();
+    sendAppUpdateStatus({ status: 'checking' });
+    const result = await checkAppUpdate(currentVersion);
+    if (result.error) {
+      sendAppUpdateStatus({ status: 'error', error: result.error });
+    } else if (result.available) {
+      sendAppUpdateStatus({
+        status: 'available',
+        version: result.version,
+        url: result.url,
+        method: 'github',
+      });
+    } else {
       sendAppUpdateStatus({ status: 'up-to-date' });
     }
+    return appUpdateState;
   };
-  await check();
+
+  activeGithubCheck = run()
+    .catch((err) => {
+      sendAppUpdateStatus({ status: 'error', error: err.message || 'Update check failed' });
+      return appUpdateState;
+    })
+    .finally(() => {
+      activeGithubCheck = null;
+    });
+
+  return activeGithubCheck;
+}
+
+async function setupGithubUpdateChecker() {
+  await runGithubUpdateCheck();
   if (!githubUpdateIntervalStarted) {
     githubUpdateIntervalStarted = true;
-    setInterval(check, 6 * 60 * 60 * 1000);
+    setInterval(() => {
+      runGithubUpdateCheck().catch(() => {});
+    }, 6 * 60 * 60 * 1000);
   }
 }
 
 ipcMain.handle('install-update', () => {
+  if (!app.isPackaged || process.platform !== 'darwin' || !squirrelUpdater) {
+    return { success: false, error: 'Auto-install only works in the packaged Mac app.' };
+  }
   try {
-    const { autoUpdater } = require('electron');
-    autoUpdater.quitAndInstall();
-  } catch { /* ignore in dev */ }
+    squirrelUpdater.quitAndInstall();
+    return { success: true };
+  } catch (err) {
+    console.warn('[auto-update] quitAndInstall failed:', err.message);
+    return { success: false, error: err.message || 'Couldn\'t install the update.' };
+  }
 });
 
 ipcMain.handle('get-app-update-status', () => appUpdateState);
@@ -767,20 +809,31 @@ ipcMain.handle('update-ytdlp', async () => {
   return await updateYtdlp();
 });
 
+ipcMain.handle('check-ytdlp-update', async () => {
+  return await checkYtdlpUpdate();
+});
+
 ipcMain.handle('get-ytdlp-version', async () => {
   return await getCurrentYtdlpVersion();
 });
 
 ipcMain.handle('check-app-update', async () => {
-  if (app.isPackaged && process.platform === 'darwin') {
-    try {
-      const { autoUpdater } = require('electron');
-      autoUpdater.checkForUpdates();
-      return appUpdateState;
-    } catch { /* fall through */ }
+  // Already have something actionable: re-emit so the UI can react again.
+  if (appUpdateState.status === 'downloaded' || appUpdateState.status === 'available') {
+    sendAppUpdateStatus(appUpdateState);
+    return appUpdateState;
   }
-  await setupGithubUpdateChecker();
-  return appUpdateState;
+
+  if (app.isPackaged && process.platform === 'darwin' && squirrelUpdater) {
+    try {
+      squirrelUpdater.checkForUpdates();
+      return appUpdateState;
+    } catch (err) {
+      console.warn('[auto-update] Manual check failed:', err.message);
+      // Fall through to GitHub check
+    }
+  }
+  return runGithubUpdateCheck({ force: true });
 });
 
 ipcMain.handle('show-notification', async (_event, title, body, filePath, stickerType = 'good') => {

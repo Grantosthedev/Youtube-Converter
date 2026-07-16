@@ -186,29 +186,23 @@
         <div class="settings-divider"></div>
         <button id="historyBtn" class="settings-action-btn"><i class="hgi-stroke hgi-clock-01 ui-icon" aria-hidden="true"></i>History</button>
         <div class="settings-divider"></div>
-        <div id="appUpdateBanner" class="settings-update-banner" style="display:none">
-          <div class="settings-update-banner__text">
-            <i class="hgi-stroke hgi-arrow-up-03 ui-icon ui-icon--xs" aria-hidden="true"></i>
-            <span id="appUpdateBannerLabel">Update available</span>
-          </div>
-          <button id="appUpdateBannerBtn" class="settings-update-banner__btn">Restart</button>
-        </div>
         <div class="settings-about">
-          <div class="settings-about__row">
-            <span id="appVersion" class="settings-about__version"></span>
-            <div class="settings-about__actions">
-              <i id="engineSpinner" class="hgi-stroke hgi-loading-03 ui-icon ui-icon--xs settings-about__spinner" aria-hidden="true" style="display:none"></i>
-              <button id="updateEngineBtn" class="settings-about__check" data-tooltip="Update download engine (yt-dlp).">
-                <i class="hgi-stroke hgi-arrows-reload-01 ui-icon ui-icon--xs" aria-hidden="true"></i>
-              </button>
-              <button id="checkAppUpdateBtn" class="settings-about__check settings-about__check--text" data-tooltip="Check for app updates.">
-                <i class="hgi-stroke hgi-arrows-reload-01 ui-icon ui-icon--xs" aria-hidden="true"></i>
-                <span>Check Updates</span>
-              </button>
+          <div id="appUpdateBanner" class="settings-update-banner" style="display:none">
+            <div class="settings-update-banner__text">
+              <i class="hgi-stroke hgi-arrow-up-03 ui-icon ui-icon--xs" aria-hidden="true"></i>
+              <span id="appUpdateBannerLabel">Update available</span>
             </div>
+            <button id="appUpdateBannerBtn" class="settings-update-banner__btn">Restart</button>
           </div>
-          <span id="engineVersion" class="settings-about__engine-ver" style="display:none"></span>
-          <span id="updateStatus" class="update-status"></span>
+          <div class="settings-about__versions">
+            <span id="appVersion" class="settings-about__version">-</span>
+            <span class="settings-about__sep"> · </span>
+            <span id="engineVersion" class="settings-about__version">-</span>
+          </div>
+          <button id="checkUpdatesBtn" class="settings-about__check-btn" data-tooltip="Check for app and engine updates.">
+            <i id="checkUpdatesBtnIcon" class="hgi-stroke hgi-arrows-reload-01 ui-icon ui-icon--xs" aria-hidden="true"></i>
+            <span aria-live="polite">Check for updates</span>
+          </button>
         </div>
       </div>
     </div>

@@ -67,7 +67,7 @@ This does everything in one command:
 - A persistent toast appears: "vX.Y.Z is ready" with an **Update** button and a dismiss X
 - Clicking **Update** shows the "Fresh Update, Fam" confirm dialog: **Restart and Update** or **Later**
 - On restart, the update is applied
-- Users can also trigger a manual check via the **Check Updates** button in Settings
+- Users can also trigger a manual check via **Check for updates** in Settings
 
 ## Prerequisites (one-time setup)
 

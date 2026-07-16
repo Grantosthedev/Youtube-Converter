@@ -77,12 +77,12 @@ const autoPasteToggle = $('#autoPasteToggle');
 const showInFinderToggle = $('#showInFinderToggle');
 const instantDownloadToggle = $('#instantDownloadToggle');
 const modeToggle = $('#modeToggle');
-const updateEngineBtn = $('#updateEngineBtn');
-const engineVersion = $('#engineVersion');
-const engineSpinner = $('#engineSpinner');
-const updateStatus = $('#updateStatus');
+const checkUpdatesBtn = $('#checkUpdatesBtn');
+const checkUpdatesBtnLabel = checkUpdatesBtn.querySelector('span');
+const checkUpdatesBtnIcon = $('#checkUpdatesBtnIcon');
+const engineVersionEl = $('#engineVersion');
+const engineVersionSep = $('.settings-about__sep');
 const appVersion = $('#appVersion');
-const checkAppUpdateBtn = $('#checkAppUpdateBtn');
 const appUpdateBanner = $('#appUpdateBanner');
 const appUpdateBannerLabel = $('#appUpdateBannerLabel');
 const appUpdateBannerBtn = $('#appUpdateBannerBtn');
@@ -3092,8 +3092,7 @@ window.api.onDownloadCancelled((data) => {
    ============================================================ */
 
 window.api.onYtdlpUpdated((version) => {
-  engineVersion.textContent = version;
-  engineVersion.style.display = '';
+  setEngineVersionDisplay(version);
   showStatusFromPool('success', 'engineUpdatedToast', version);
 });
 
@@ -3842,53 +3841,179 @@ modeToggle.addEventListener('click', (e) => {
 enforceTimeFormat(startTime);
 enforceTimeFormat(endTime);
 
-updateEngineBtn.addEventListener('click', async (e) => {
-  e.stopPropagation();
-  updateEngineBtn.disabled = true;
-  engineSpinner.style.display = '';
-  updateStatus.textContent = t('Downloading latest version…');
-  updateStatus.className = 'update-status';
-  try {
-    const result = await window.api.updateYtdlp();
-    if (result.success) {
-      engineVersion.textContent = result.version;
-      engineVersion.style.display = '';
-      updateStatus.textContent = '';
-      updateStatus.className = 'update-status success';
-      showStatusFromPool('success', 'engineUpdatedToast', result.version);
-    } else {
-      updateStatus.textContent = result.error || t('Something went wrong');
-      updateStatus.className = 'update-status error';
-    }
-  } catch (err) {
-    updateStatus.textContent = t('Couldn\'t reach the server. Check your connection.');
-    updateStatus.className = 'update-status error';
-  } finally {
-    updateEngineBtn.disabled = false;
-    engineSpinner.style.display = 'none';
-  }
-});
-
-let appUpdateCheckUserTriggered = false;
-const checkAppUpdateBtnLabel = checkAppUpdateBtn.querySelector('span');
-
-function setCheckUpdateBtnIdle() {
-  appUpdateCheckUserTriggered = false;
-  checkAppUpdateBtn.disabled = false;
-  checkAppUpdateBtn.classList.remove('spinning');
-  if (checkAppUpdateBtnLabel) checkAppUpdateBtnLabel.textContent = 'Check Updates';
+function formatEngineVersion(version) {
+  if (!version) return '';
+  return version.startsWith('yt-dlp') ? version : `yt-dlp ${version}`;
 }
 
-checkAppUpdateBtn.addEventListener('click', async (e) => {
+function setEngineVersionDisplay(version) {
+  const formatted = formatEngineVersion(version);
+  if (!formatted) {
+    engineVersionEl.textContent = '';
+    engineVersionEl.style.display = 'none';
+    if (engineVersionSep) engineVersionSep.style.display = 'none';
+    return;
+  }
+  engineVersionEl.textContent = formatted;
+  engineVersionEl.style.display = '';
+  if (engineVersionSep) engineVersionSep.style.display = '';
+}
+
+function setCheckUpdatesBtnIdle() {
+  clearUpdateCheckTimers();
+  appUpdateCheckUserTriggered = false;
+  pendingUpdateCheck = null;
+  checkUpdatesBtn.disabled = false;
+  checkUpdatesBtn.classList.remove('spinning');
+  checkUpdatesBtnIcon.className = 'hgi-stroke hgi-arrows-reload-01 ui-icon ui-icon--xs';
+  if (checkUpdatesBtnLabel) checkUpdatesBtnLabel.textContent = 'Check for updates';
+}
+
+function setCheckUpdatesBtnBusy(label) {
+  checkUpdatesBtn.disabled = true;
+  checkUpdatesBtn.classList.add('spinning');
+  checkUpdatesBtnIcon.className = 'hgi-stroke hgi-loading-03 ui-icon ui-icon--xs';
+  if (checkUpdatesBtnLabel) checkUpdatesBtnLabel.textContent = label;
+}
+
+async function requestInstallUpdate() {
+  try {
+    const result = await window.api.installUpdate();
+    if (result && result.success === false) {
+      showStatus('error', result.error || 'Couldn\'t install the update. Try again.');
+    }
+  } catch {
+    showStatus('error', 'Couldn\'t install the update. Try again.');
+  }
+}
+
+let appUpdateCheckUserTriggered = false;
+let appUpdateCheckSafetyTimer = null;
+let engineUpdateSafetyTimer = null;
+let pendingUpdateCheck = null;
+
+function clearUpdateCheckTimers() {
+  clearTimeout(appUpdateCheckSafetyTimer);
+  clearTimeout(engineUpdateSafetyTimer);
+  appUpdateCheckSafetyTimer = null;
+  engineUpdateSafetyTimer = null;
+}
+
+function abortUpdateCheck(toastMessage) {
+  pendingUpdateCheck = null;
+  clearUpdateCheckTimers();
+  setCheckUpdatesBtnIdle();
+  hideActivityToast();
+  showStatus('error', toastMessage);
+}
+
+function startAppCheckTimeout() {
+  clearTimeout(appUpdateCheckSafetyTimer);
+  appUpdateCheckSafetyTimer = setTimeout(() => {
+    if (!appUpdateCheckUserTriggered || pendingUpdateCheck?.appDone) return;
+    abortUpdateCheck('Update check timed out. Check your connection and try again.');
+  }, 45000);
+}
+
+function startEngineUpdateTimeout() {
+  clearTimeout(appUpdateCheckSafetyTimer);
+  clearTimeout(engineUpdateSafetyTimer);
+  engineUpdateSafetyTimer = setTimeout(() => {
+    if (!appUpdateCheckUserTriggered || pendingUpdateCheck?.engineDone) return;
+    abortUpdateCheck('Engine update timed out. Check your connection and try again.');
+  }, 5 * 60 * 1000);
+}
+
+function markAppUpdateCheckDone(status) {
+  if (!pendingUpdateCheck?.userTriggered) return;
+  pendingUpdateCheck.appDone = true;
+  pendingUpdateCheck.appStatus = status;
+  clearTimeout(appUpdateCheckSafetyTimer);
+  appUpdateCheckSafetyTimer = null;
+  if (status === 'up-to-date' && !pendingUpdateCheck.engineDone) {
+    startEngineUpdateTimeout();
+    setCheckUpdatesBtnBusy('Updating download engine...');
+  }
+  maybeFinishUpdateCheck();
+}
+
+function maybeFinishUpdateCheck() {
+  const pending = pendingUpdateCheck;
+  if (!pending?.userTriggered || !pending.engineDone || !pending.appDone) return;
+
+  const terminalAppStatuses = ['up-to-date', 'error'];
+  if (!terminalAppStatuses.includes(pending.appStatus)) {
+    pendingUpdateCheck = null;
+    return;
+  }
+
+  clearUpdateCheckTimers();
+  setCheckUpdatesBtnIdle();
+
+  if (pending.appStatus === 'error') {
+    pendingUpdateCheck = null;
+    return;
+  }
+
+  const engine = pending.engineResult;
+  if (engine?.success && !engine.skipped && engine.version) {
+    setEngineVersionDisplay(engine.version);
+    completeActivityToast('Updates applied. You good.');
+    showStatusFromPool('success', 'engineUpdatedToast', engine.version);
+  } else if (engine?.success === false) {
+    hideActivityToast();
+    showStatus('error', engine.error || t('Something went wrong'));
+  } else {
+    completeActivityToast('Already on the latest. You good.');
+    showStatus('success', 'Already on the latest version. You good.');
+  }
+
+  pendingUpdateCheck = null;
+}
+
+checkUpdatesBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
   appUpdateCheckUserTriggered = true;
-  checkAppUpdateBtn.disabled = true;
-  checkAppUpdateBtn.classList.add('spinning');
-  if (checkAppUpdateBtnLabel) checkAppUpdateBtnLabel.textContent = 'Checking...';
+  pendingUpdateCheck = {
+    userTriggered: true,
+    appDone: false,
+    engineDone: false,
+    appStatus: null,
+    engineResult: null,
+  };
+  setCheckUpdatesBtnBusy('Checking for updates...');
+  showActivityToast('Checking for updates...');
+  startAppCheckTimeout();
+
+  window.api.checkYtdlpUpdate()
+    .then((result) => {
+      if (!pendingUpdateCheck?.userTriggered) return;
+      pendingUpdateCheck.engineDone = true;
+      pendingUpdateCheck.engineResult = result;
+      if (result?.success && result.version) {
+        setEngineVersionDisplay(result.version);
+      }
+      maybeFinishUpdateCheck();
+    })
+    .catch(() => {
+      if (!pendingUpdateCheck?.userTriggered) return;
+      pendingUpdateCheck.engineDone = true;
+      pendingUpdateCheck.engineResult = { success: false, error: t('Couldn\'t reach the server. Check your connection.') };
+      maybeFinishUpdateCheck();
+    });
+
   try {
-    await window.api.checkAppUpdate();
-  } catch { /* errors handled via status channel */ }
-  setTimeout(setCheckUpdateBtnIdle, 2000);
+    const state = await window.api.checkAppUpdate();
+    if (pendingUpdateCheck?.userTriggered && !pendingUpdateCheck.appDone && state?.status) {
+      applyAppUpdateStatus(state);
+    }
+  } catch {
+    pendingUpdateCheck = null;
+    clearUpdateCheckTimers();
+    setCheckUpdatesBtnIdle();
+    hideActivityToast();
+    showStatus('error', 'Update check failed. Check your connection and try again.');
+  }
 });
 
 /* ============================================================
@@ -5647,11 +5772,10 @@ async function init() {
 
   try {
     const ytdlpVer = await window.api.getYtdlpVersion();
-    if (ytdlpVer) {
-      engineVersion.textContent = ytdlpVer;
-      engineVersion.style.display = '';
-    }
-  } catch { /* non-fatal */ }
+    setEngineVersionDisplay(ytdlpVer);
+  } catch {
+    setEngineVersionDisplay(null);
+  }
 
   setupAppUpdateListener();
 }
@@ -5660,54 +5784,73 @@ async function init() {
    Unified App Update State
    ============================================================ */
 
-function setupAppUpdateListener() {
-  function handleAppUpdateStatus(data) {
-    if (!data) return;
-    switch (data.status) {
-      case 'checking':
-        checkAppUpdateBtn.classList.add('spinning');
-        checkAppUpdateBtn.disabled = true;
-        if (checkAppUpdateBtnLabel) checkAppUpdateBtnLabel.textContent = 'Checking...';
-        if (appUpdateCheckUserTriggered) showActivityToast('Checking for updates...');
-        break;
-      case 'up-to-date':
-        setCheckUpdateBtnIdle();
-        if (appUpdateCheckUserTriggered) {
-          completeActivityToast('Already on the latest. You good.');
-          showStatus('success', 'Already on the latest version. You good.');
-        }
-        break;
-      case 'available':
-        showAppUpdateAvailable(data.version, data.url, 'github');
-        setCheckUpdateBtnIdle();
-        if (appUpdateCheckUserTriggered) completeActivityToast('Update found.');
-        break;
-      case 'downloading':
-        checkAppUpdateBtn.classList.remove('spinning');
-        if (checkAppUpdateBtnLabel) checkAppUpdateBtnLabel.textContent = 'Check Updates';
-        break;
-      case 'downloaded':
-        showAppUpdateAvailable(data.version, null, 'squirrel');
-        showUpdateDialog(data.version);
-        setCheckUpdateBtnIdle();
-        break;
-      case 'error':
-        setCheckUpdateBtnIdle();
-        if (appUpdateCheckUserTriggered) {
-          hideActivityToast();
-          showStatus('error', 'Update check failed. Check your connection and try again.');
-        }
-        break;
+function applyAppUpdateStatus(data) {
+  if (!data) return;
+  switch (data.status) {
+    case 'checking':
+      if (appUpdateCheckUserTriggered) {
+        setCheckUpdatesBtnBusy('Checking for updates...');
+        showActivityToast('Checking for updates...');
+      }
+      break;
+    case 'up-to-date':
+      if (appUpdateCheckUserTriggered) {
+        markAppUpdateCheckDone('up-to-date');
+      }
+      break;
+    case 'available': {
+      const wasUser = appUpdateCheckUserTriggered;
+      showAppUpdateAvailable(data.version, data.url, 'github');
+      if (wasUser) {
+        pendingUpdateCheck = null;
+        clearUpdateCheckTimers();
+        setCheckUpdatesBtnIdle();
+        completeActivityToast('Update found.');
+      }
+      break;
     }
+    case 'downloading':
+      if (appUpdateCheckUserTriggered) {
+        clearUpdateCheckTimers();
+        appUpdateCheckSafetyTimer = setTimeout(() => {
+          if (!appUpdateCheckUserTriggered) return;
+          abortUpdateCheck('Update download timed out. Check your connection and try again.');
+        }, 10 * 60 * 1000);
+        setCheckUpdatesBtnBusy('Downloading app update...');
+        showActivityToast('Downloading update...');
+      }
+      break;
+    case 'downloaded': {
+      const wasUser = appUpdateCheckUserTriggered;
+      showAppUpdateAvailable(data.version, null, 'squirrel');
+      showUpdateDialog(data.version);
+      if (wasUser) {
+        pendingUpdateCheck = null;
+        clearUpdateCheckTimers();
+        setCheckUpdatesBtnIdle();
+        completeActivityToast('Update ready.');
+      }
+      break;
+    }
+    case 'error':
+      if (appUpdateCheckUserTriggered) {
+        pendingUpdateCheck = null;
+        clearUpdateCheckTimers();
+        setCheckUpdatesBtnIdle();
+        hideActivityToast();
+        showStatus('error', data.error || 'Update check failed. Check your connection and try again.');
+      }
+      break;
   }
+}
 
-  window.api.onAppUpdateStatus(handleAppUpdateStatus);
+function setupAppUpdateListener() {
+  window.api.onAppUpdateStatus(applyAppUpdateStatus);
 
-  window.api.getAppUpdateStatus().then(handleAppUpdateStatus).catch(() => {});
+  window.api.getAppUpdateStatus().then(applyAppUpdateStatus).catch(() => {});
 }
 
 function showAppUpdateAvailable(version, url, method) {
-  // Settings banner + gear dot
   appUpdateBannerLabel.textContent = `v${version} available`;
   settingsUpdateDot.style.display = '';
 
@@ -5715,7 +5858,7 @@ function showAppUpdateAvailable(version, url, method) {
     appUpdateBannerBtn.textContent = 'Restart';
     appUpdateBannerBtn.onclick = (e) => {
       e.stopPropagation();
-      window.api.installUpdate();
+      requestInstallUpdate();
     };
   } else {
     appUpdateBannerBtn.textContent = 'Download';
@@ -5726,7 +5869,7 @@ function showAppUpdateAvailable(version, url, method) {
   }
   appUpdateBanner.style.display = '';
 
-  // Persistent update toast — stays until acted on or dismissed
+  // Persistent update toast: stays until acted on or dismissed
   clearTimeout(statusHideTimer);
   statusMessage.className = 'status-message update';
   statusIcon.innerHTML = icon('arrow-up-03', 'ui-icon');
@@ -5748,7 +5891,6 @@ function showAppUpdateAvailable(version, url, method) {
   statusDismissBtn.onclick = () => hideStatus();
 
   requestAnimationFrame(() => statusMessage.classList.add('visible'));
-  // No auto-hide timer — toast persists until user acts or dismisses
 }
 
 function showUpdateDialog(version) {
@@ -5789,13 +5931,18 @@ function showUpdateDialog(version) {
   function close() {
     overlay.classList.remove('visible');
     overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+    document.removeEventListener('keydown', onKey);
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') close();
   }
 
   overlay.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-choice]');
     if (btn) {
       if (btn.dataset.choice === 'restart') {
-        window.api.installUpdate();
+        requestInstallUpdate();
       } else {
         close();
       }
@@ -5804,7 +5951,6 @@ function showUpdateDialog(version) {
     if (!e.target.closest('.update-dialog-panel')) close();
   });
 
-  const onKey = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); close(); } };
   document.addEventListener('keydown', onKey);
 }
 

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
   updateYtdlp: () => ipcRenderer.invoke('update-ytdlp'),
+  checkYtdlpUpdate: () => ipcRenderer.invoke('check-ytdlp-update'),
   getYtdlpVersion: () => ipcRenderer.invoke('get-ytdlp-version'),
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   getClipboard: () => ipcRenderer.invoke('get-clipboard'),

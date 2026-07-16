@@ -39,7 +39,7 @@ const ERROR_MAP = [
   { pattern: /urlopen error|timed out|(?:network|connection).*(?:error|refused|reset)/i, message: 'Network error. Check your internet connection and try again.' },
   { pattern: /video.*(?:unavailable|removed|deleted|not exist)/i, message: 'This video is unavailable or has been removed.' },
   { pattern: /is not a valid URL|no video/i, message: 'Please enter a valid URL.' },
-  { pattern: /nsig extraction|signature extraction|player.*error|cipher/i, message: 'yt-dlp is outdated and can\'t decrypt this video. Hit "Update" in Settings to fix it.' },
+  { pattern: /nsig extraction|signature extraction|player.*error|cipher/i, message: 'yt-dlp is outdated and can\'t decrypt this video. Hit Check for updates in Settings to fix it.' },
   { pattern: /ExtractorError|extractor.*error/i, message: 'yt-dlp can\'t process this URL. Try updating yt-dlp in Settings.' },
   { pattern: /certificate verify failed|SSL/i, message: 'SSL certificate error. Check your network or try disabling VPN/proxy.' },
   { pattern: /Incomplete data|incomplete read/i, message: 'Download was interrupted. Check your connection and try again.' },

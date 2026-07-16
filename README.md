@@ -63,7 +63,7 @@ See [RELEASING.md](RELEASING.md) for the full step-by-step guide, prerequisites,
 
 ## Updating yt-dlp
 
-If downloads start failing, YouTube may have changed its API. Click the **Update** button in the app header to download the latest yt-dlp binary.
+If downloads start failing, YouTube may have changed its API. Open Settings and hit **Check for updates** to refresh the yt-dlp engine.
 
 ## Instagram Remote Config
 
