@@ -1,0 +1,39 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  detectPlatform,
+  extractVideoId,
+  isTiktokPhotoUrl,
+  isValidURL,
+  normalizeInstagramURL,
+  normalizeYouTubeURL,
+  sanitizeFilename,
+} = require('../src/utils');
+
+test('detects supported platforms and rejects unrelated URLs', () => {
+  assert.equal(detectPlatform('https://youtu.be/dQw4w9WgXcQ'), 'youtube');
+  assert.equal(detectPlatform('https://www.instagram.com/reel/ABC_123/'), 'instagram');
+  assert.equal(detectPlatform('https://www.tiktok.com/@creator/video/1234567890'), 'tiktok');
+  assert.equal(detectPlatform('https://example.com/video'), null);
+  assert.equal(isValidURL('https://example.com/video'), false);
+});
+
+test('normalizes YouTube and Instagram URLs without changing unsupported hosts', () => {
+  assert.equal(extractVideoId('https://youtube.com/watch?v=dQw4w9WgXcQ&t=30'), 'dQw4w9WgXcQ');
+  assert.equal(
+    normalizeYouTubeURL('https://youtu.be/dQw4w9WgXcQ?t=30'),
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  );
+  assert.equal(
+    normalizeInstagramURL('https://instagram.com/reels/ABC_123/?utm_source=test'),
+    'https://www.instagram.com/reel/ABC_123/?utm_source=test',
+  );
+  assert.equal(normalizeInstagramURL('https://example.com/reels/ABC/'), 'https://example.com/reels/ABC/');
+});
+
+test('identifies TikTok photo posts and creates safe filenames', () => {
+  assert.equal(isTiktokPhotoUrl('https://www.tiktok.com/@creator/photo/1234567890'), true);
+  assert.equal(sanitizeFilename('../bad:name?.mp4 '), '-bad-name-.mp4');
+  assert.equal(sanitizeFilename('...'), 'download');
+});

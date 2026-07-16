@@ -1,3 +1,3 @@
-const { init } = require('@sentry/electron/renderer');
+const Sentry = require('@sentry/electron/renderer');
 
-init();
+Sentry.init();

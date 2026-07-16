@@ -1,11 +1,21 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Notification, nativeImage, nativeTheme } = require('electron');
 const Sentry = require('@sentry/electron/main');
+const {
+  addBreadcrumb,
+  configureSentryReporting,
+  reportError,
+  scrubSentryEvent,
+} = require('./sentry-report');
 
 Sentry.init({
   dsn: 'https://ba4c6bd4faa389aa182a7407e6cc186f@o4511745156710400.ingest.us.sentry.io/4511745161166848',
   release: `downroad@${app.getVersion()}`,
   environment: app.isPackaged ? 'production' : 'development',
+  sendDefaultPii: false,
+  attachScreenshot: false,
+  beforeSend: scrubSentryEvent,
 });
+configureSentryReporting(Sentry);
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -108,6 +118,7 @@ async function runGithubUpdateCheck({ force = false } = {}) {
 
   activeGithubCheck = run()
     .catch((err) => {
+      reportError(err, { phase: 'app-update-check', platform: process.platform });
       sendAppUpdateStatus({ status: 'error', error: err.message || 'Update check failed' });
       return appUpdateState;
     })
@@ -137,6 +148,7 @@ ipcMain.handle('install-update', () => {
     return { success: true };
   } catch (err) {
     console.warn('[auto-update] quitAndInstall failed:', err.message);
+    reportError(err, { phase: 'app-update-install', platform: process.platform });
     return { success: false, error: err.message || 'Couldn\'t install the update.' };
   }
 });
@@ -335,6 +347,7 @@ ipcMain.handle('fetch-video-info', async (_event, url) => {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
   const platform = detectPlatform(url);
+  addBreadcrumb('Fetch video info', { platform });
   const normalizedUrl = platform === 'youtube'
     ? normalizeYouTubeURL(url)
     : platform === 'instagram'
@@ -381,6 +394,11 @@ ipcMain.handle('start-download', async (event, options) => {
   }
 
   const platform = detectPlatform(options.url);
+  addBreadcrumb('Download requested', {
+    platform,
+    quality: options.quality || 'best',
+    mediaType: options.mediaType || 'video',
+  });
   const basePath = options.outputPath || store.get('downloadPath');
   const activeProject = store.get('activeProject');
   const useSubfolder = activeProject && store.get('projectSubfolders')[activeProject] !== false;
@@ -1088,6 +1106,7 @@ app.on('ready', () => {
     return ensureYtdlpFresh(store);
   })().then((result) => {
     if (!result) return;
+    if (result.version) Sentry.setTag('ytdlp_version', String(result.version));
     if (result.success && !result.skipped) {
       console.log(`[startup] yt-dlp ready: ${result.version}`);
       if (mainWindow && !mainWindow.isDestroyed()) {
