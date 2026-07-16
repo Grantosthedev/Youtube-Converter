@@ -1,4 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Notification, nativeImage, nativeTheme } = require('electron');
+const Sentry = require('@sentry/electron/main');
+
+Sentry.init({
+  dsn: 'https://ba4c6bd4faa389aa182a7407e6cc186f@o4511745156710400.ingest.us.sentry.io/4511745161166848',
+  release: `downroad@${app.getVersion()}`,
+  environment: app.isPackaged ? 'production' : 'development',
+});
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');

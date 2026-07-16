@@ -10,7 +10,8 @@
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "postpublish": "node scripts/set-release-notes.js",
-    "postinstall": "node scripts/download-ytdlp.js"
+    "build:sentry": "node scripts/build-sentry-renderer.js",
+    "postinstall": "node scripts/download-ytdlp.js && node scripts/build-sentry-renderer.js"
   },
   "author": "Grantosthedev",
   "license": "MIT",
@@ -27,9 +28,11 @@
     "@electron-forge/publisher-github": "^7.11.1",
     "@electron/fuses": "^1.8.0",
     "dotenv": "^17.3.1",
-    "electron": "^40.8.0"
+    "electron": "^40.8.0",
+    "esbuild": "^0.25.0"
   },
   "dependencies": {
+    "@sentry/electron": "^7.15.0",
     "electron-store": "^8.2.0",
     "ffmpeg-static": "^5.3.0"
   }

@@ -1,6 +1,7 @@
 node_modules/
 out/
 bin/
+src/renderer/sentry-renderer.js
 .DS_Store
 *.log
 .env
