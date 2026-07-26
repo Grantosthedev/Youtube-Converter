@@ -44,7 +44,7 @@ const ERROR_MAP = [
   { pattern: /ExtractorError|extractor.*error/i, message: 'yt-dlp can\'t process this URL. Try updating yt-dlp in Settings.' },
   { pattern: /certificate verify failed|SSL/i, message: 'SSL certificate error. Check your network or try disabling VPN/proxy.' },
   { pattern: /Incomplete data|incomplete read/i, message: 'Download was interrupted. Check your connection and try again.' },
-  { pattern: /content.*not available|currently unavailable/i, message: 'This content is currently unavailable on the platform.' },
+  { pattern: /content.*(?:not|isn't) available|currently unavailable/i, message: 'This content is currently unavailable on the platform.' },
   { pattern: /unable to download webpage/i, message: 'Couldn\'t reach the platform. Check your internet or try updating yt-dlp in Settings.' },
   { pattern: /Got error.*Traceback|ModuleNotFoundError|ImportError/i, message: 'yt-dlp binary is corrupted or incompatible. Try updating yt-dlp in Settings.' },
 ];
@@ -774,4 +774,11 @@ function fetchInstagramMediaViaYtdlp(url) {
   });
 }
 
-module.exports = { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp };
+module.exports = {
+  fetchVideoInfo,
+  startDownload,
+  fetchCarouselVideos,
+  fetchInstagramMediaViaYtdlp,
+  cleanStaleYtdlpTemp,
+  mapError,
+};
