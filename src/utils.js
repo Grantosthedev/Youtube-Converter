@@ -47,6 +47,12 @@ function normalizeInstagramURL(url) {
     if (!/(^|\.)instagram\.com$/i.test(parsed.hostname)) return trimmed;
     parsed.hostname = 'www.instagram.com';
     parsed.pathname = parsed.pathname.replace(/^\/reels\//i, '/reel/');
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (key.toLowerCase() === 'igsh' || key.toLowerCase().startsWith('utm_')) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    parsed.hash = '';
     return parsed.toString();
   } catch {
     return trimmed.replace(/(instagram\.com\/)reels\//i, '$1reel/');

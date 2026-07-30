@@ -27,7 +27,15 @@ test('normalizes YouTube and Instagram URLs without changing unsupported hosts',
   );
   assert.equal(
     normalizeInstagramURL('https://instagram.com/reels/ABC_123/?utm_source=test'),
-    'https://www.instagram.com/reel/ABC_123/?utm_source=test',
+    'https://www.instagram.com/reel/ABC_123/',
+  );
+  assert.equal(
+    normalizeInstagramURL('https://www.instagram.com/reel/DbKz_FIMK3C/?utm_source=ig_web_copy_link&igsh=tracking'),
+    'https://www.instagram.com/reel/DbKz_FIMK3C/',
+  );
+  assert.equal(
+    normalizeInstagramURL('https://www.instagram.com/p/DbKz_FIMK3C/?img_index=2&igsh=tracking'),
+    'https://www.instagram.com/p/DbKz_FIMK3C/?img_index=2',
   );
   assert.equal(normalizeInstagramURL('https://example.com/reels/ABC/'), 'https://example.com/reels/ABC/');
 });

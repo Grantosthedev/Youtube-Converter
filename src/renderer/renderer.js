@@ -544,6 +544,7 @@ const PROFESSIONAL_STRINGS = new Map([
   ['Not ready yet', 'Not ready yet'],
   ['TikTok photo slideshows aren\'t supported yet. Video posts work great though!', 'TikTok photo slideshows are not supported. Video posts are supported.'],
   ['Couldn\'t fetch this Instagram post. It may be private or require login.', 'Could not fetch this Instagram post. It may be private or require login.'],
+  ['Couldn\'t fetch the Reel video. Update yt-dlp in Settings and try again.', 'Could not fetch the Reel video. Update the download engine in Settings and try again.'],
   ['Loading...', 'Loading...'],
   ['Newest first', 'Newest first'],
   ['Oldest first', 'Oldest first'],
@@ -622,6 +623,7 @@ const DIABOLICAL_STRINGS = new Map([
   ['Not ready yet', 'NOT READY. WHAT THE FUCK ARE YOU DOING.'],
   ['TikTok photo slideshows aren\'t supported yet. Video posts work great though!', 'TIKTOK SLIDESHOWS? NO. VIDEO ONLY. READ THE ROOM, IDIOT.'],
   ['Couldn\'t fetch this Instagram post. It may be private or require login.', 'CAN\'T FETCH THAT INSTAGRAM POST. PROBABLY PRIVATE. PROBABLY YOUR FAULT.'],
+  ['Couldn\'t fetch the Reel video. Update yt-dlp in Settings and try again.', 'CAN\'T FETCH THE ACTUAL REEL VIDEO. UPDATE YT-DLP IN SETTINGS AND TRY AGAIN.'],
   ['Loading...', 'LOADING...'],
   ['Newest first', 'Newest first'],
   ['Oldest first', 'Oldest first'],
@@ -2221,6 +2223,18 @@ function resetVideoState() {
 
 let lastFailedUrl = '';
 
+function isInstagramReelUrl(url) {
+  return /instagram\.com\/(?:reel|reels|tv)\//i.test(url);
+}
+
+function instagramFetchError(url, mediaInfo) {
+  const reelVideoUnavailable = mediaInfo?.errorCode === 'instagram-reel-video-unavailable' ||
+    (isInstagramReelUrl(url) && !mediaInfo?.items?.some(item => item.type === 'video' && item.url));
+  return reelVideoUnavailable
+    ? t('Couldn\'t fetch the Reel video. Update yt-dlp in Settings and try again.')
+    : t('Couldn\'t fetch this Instagram post. It may be private or require login.');
+}
+
 /* ============================================================
    Instagram Content Fetching (media-fetcher + yt-dlp fallback)
    ============================================================ */
@@ -2237,8 +2251,10 @@ async function fetchInstagramContent(url) {
 
   try {
     const mediaInfo = await window.api.fetchMediaInfo(url);
+    const reelMissingVideo = isInstagramReelUrl(url) &&
+      !mediaInfo?.items?.some(item => item.type === 'video' && item.url);
 
-    if (mediaInfo && mediaInfo.items && mediaInfo.items.length > 0) {
+    if (!reelMissingVideo && mediaInfo && mediaInfo.items && mediaInfo.items.length > 0) {
       if (mediaInfo.isCarousel && mediaInfo.items.length > 1) {
         showCarouselPicker(mediaInfo, url);
         updateQualityLabels('instagram', 'carousel');
@@ -2265,7 +2281,7 @@ async function fetchInstagramContent(url) {
       return;
     }
 
-    showStatus('error', t('Couldn\'t fetch this Instagram post. It may be private or require login.'));
+    showStatus('error', instagramFetchError(url, mediaInfo));
     lastFailedUrl = url;
     statusRetry.style.display = '';
   } catch (err) {
@@ -2669,9 +2685,11 @@ async function handleInstantInstagramDownload(url) {
 
   try {
     const mediaInfo = await window.api.fetchMediaInfo(url);
+    const reelMissingVideo = isInstagramReelUrl(url) &&
+      !mediaInfo?.items?.some(item => item.type === 'video' && item.url);
 
-    if (!mediaInfo || !mediaInfo.items || mediaInfo.items.length === 0) {
-      showStatus('error', t('Couldn\'t fetch this Instagram post. It may be private or require login.'));
+    if (reelMissingVideo || !mediaInfo || !mediaInfo.items || mediaInfo.items.length === 0) {
+      showStatus('error', instagramFetchError(url, mediaInfo));
       return;
     }
 

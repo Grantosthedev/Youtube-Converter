@@ -2,10 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  _test,
   fetchMediaInfo,
   isInstagramVideoUrl,
   isUsableMediaResult,
 } = require('../src/media-fetcher');
+
+const { buildFromOgTags, constrainResultToContentType, parseGraphqlMedia } = _test;
 
 function thumbnailResult() {
   return {
@@ -69,7 +72,8 @@ test('never downgrades a reel to an embed or Open Graph image', async () => {
     fetchEmbedData: async () => thumbnailResult(),
   });
 
-  assert.equal(result, null);
+  assert.equal(result.errorCode, 'instagram-reel-video-unavailable');
+  assert.deepEqual(result.items, []);
 });
 
 test('keeps the fast GraphQL path for regular Instagram photos', async () => {
@@ -85,4 +89,57 @@ test('keeps the fast GraphQL path for regular Instagram photos', async () => {
 
   assert.equal(ytdlpCalls, 0);
   assert.deepEqual(result, expectedImage);
+});
+
+test('parses current Instagram mobile video metadata as video', () => {
+  const result = parseGraphqlMedia({
+    media_type: 2,
+    taken_at: 1720000000,
+    user: { username: 'creator' },
+    caption: { text: 'A Reel' },
+    image_versions2: {
+      candidates: [{ url: 'https://cdn.example/thumb.jpg', width: 1080, height: 1920 }],
+    },
+    video_versions: [{ url: 'https://cdn.example/reel.mp4', width: 1080, height: 1920 }],
+  });
+
+  assert.equal(result.owner, 'creator');
+  assert.equal(result.items[0].type, 'video');
+  assert.equal(result.items[0].url, 'https://cdn.example/reel.mp4');
+  assert.equal(result.items[0].thumbnail, 'https://cdn.example/thumb.jpg');
+});
+
+test('parses mixed current Instagram carousel metadata', () => {
+  const result = parseGraphqlMedia({
+    media_type: 8,
+    user: { username: 'creator' },
+    carousel_media: [
+      {
+        media_type: 1,
+        image_versions2: { candidates: [{ url: 'https://cdn.example/photo.jpg' }] },
+      },
+      {
+        media_type: 2,
+        image_versions2: { candidates: [{ url: 'https://cdn.example/video-thumb.jpg' }] },
+        video_versions: [{ url: 'https://cdn.example/video.mp4' }],
+      },
+    ],
+  });
+
+  assert.equal(result.isCarousel, true);
+  assert.deepEqual(result.items.map(item => item.type), ['image', 'video']);
+  assert.equal(result.items[1].url, 'https://cdn.example/video.mp4');
+});
+
+test('does not downgrade requested Reel video to an image fallback', () => {
+  const imageResult = {
+    isCarousel: false,
+    items: [{ type: 'image', url: 'https://cdn.example/poster.jpg' }],
+  };
+
+  assert.equal(constrainResultToContentType(imageResult, 'video'), null);
+  assert.equal(
+    buildFromOgTags({ 'og:image': 'https://cdn.example/poster.jpg' }, 'video'),
+    null,
+  );
 });
