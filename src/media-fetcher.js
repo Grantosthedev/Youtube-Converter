@@ -107,6 +107,23 @@ function extractShortcode(url) {
   return m ? m[1] : null;
 }
 
+function isInstagramVideoUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const isInstagramHost = parsed.hostname === 'instagram.com' ||
+      parsed.hostname.endsWith('.instagram.com');
+    return isInstagramHost && /^\/(?:reel|reels|tv)\//i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isUsableMediaResult(result, requiresVideo = false) {
+  if (!result || !Array.isArray(result.items) || result.items.length === 0) return false;
+  if (!requiresVideo) return true;
+  return result.items.some(item => item.type === 'video' && item.url);
+}
+
 function parseOgTags(html) {
   const tags = {};
   const re1 = /<meta[^>]+property=["'](og:[^"']+)["'][^>]+content=["']([^"']*)["'][^>]*\/?>/gi;
@@ -460,34 +477,44 @@ async function fetchGraphqlPost(shortcode) {
    Layer 4: OG meta tags (always available, single item only)
    ============================================================ */
 
-async function fetchMediaInfo(url) {
+async function fetchMediaInfo(url, dependencies = {}) {
   try {
     const shortcode = extractShortcode(url);
+    const requiresVideo = isInstagramVideoUrl(url);
+    const graphqlFetcher = dependencies.fetchGraphqlPost || fetchGraphqlPost;
+    const ytdlpFetcher = Object.prototype.hasOwnProperty.call(dependencies, 'ytdlpFetcher')
+      ? dependencies.ytdlpFetcher
+      : _ytdlpFetcher;
+    const embedFetcher = dependencies.fetchEmbedData || fetchEmbedData;
+    const httpGetter = dependencies.httpGet || httpGet;
     let pageHtml = '';
 
     // Layer 1: GraphQL POST with dynamic lsd + multi-doc_id (fastest)
     if (shortcode) {
       try {
-        const gql = await fetchGraphqlPost(shortcode);
+        const gql = await graphqlFetcher(shortcode);
         pageHtml = gql.pageHtml || '';
-        if (gql.result && gql.result.items && gql.result.items.length > 0) {
+        if (isUsableMediaResult(gql.result, requiresVideo)) {
           return gql.result;
+        }
+        if (requiresVideo && gql.result) {
+          console.log('[ig-media] GraphQL returned only a reel thumbnail; continuing to video extraction');
         }
       } catch { /* continue */ }
     }
 
     // Layer 2: yt-dlp (handles videos, images, AND carousels reliably)
-    if (_ytdlpFetcher) {
+    if (ytdlpFetcher) {
       try {
-        const result = await _ytdlpFetcher(url);
-        if (result && result.items && result.items.length > 0) return result;
+        const result = await ytdlpFetcher(url);
+        if (isUsableMediaResult(result, requiresVideo)) return result;
       } catch { /* continue */ }
     }
 
     // Fetch page HTML if we don't have it yet (for embed/OG fallbacks)
     if (!pageHtml) {
       try {
-        pageHtml = await httpGet(url);
+        pageHtml = await httpGetter(url);
       } catch {
         pageHtml = '';
       }
@@ -495,19 +522,18 @@ async function fetchMediaInfo(url) {
 
     const ogTags = pageHtml ? parseOgTags(pageHtml) : {};
     const resolvedShortcode = shortcode || extractShortcode(ogTags['og:url'] || '');
-    const isVideoUrl = /instagram\.com\/(reel|reels|tv)\//i.test(url);
-    const urlContentType = isVideoUrl ? 'video' : null;
+    const urlContentType = requiresVideo ? 'video' : null;
     const contentType = urlContentType || (pageHtml ? detectContentType(pageHtml, ogTags) : 'image');
 
     // Layer 3: Embed page (only returns first image for carousels)
     if (resolvedShortcode) {
       try {
-        const embedResult = await fetchEmbedData(resolvedShortcode);
+        const embedResult = await embedFetcher(resolvedShortcode);
         if (embedResult && embedResult.items.length > 0) {
           if (contentType === 'video') {
             embedResult.isCarousel = false;
             const videoItems = embedResult.items.filter(i => i.type === 'video');
-            embedResult.items = videoItems.length > 0 ? [videoItems[0]] : [embedResult.items[0]];
+            embedResult.items = videoItems.length > 0 ? [videoItems[0]] : [];
           }
 
           if (/[?&]img_index=/.test(url) && embedResult.items.length > 1) {
@@ -522,14 +548,14 @@ async function fetchMediaInfo(url) {
               if (!item.thumbnail) item.thumbnail = fallbackThumb;
             }
           }
-          return embedResult;
+          if (isUsableMediaResult(embedResult, requiresVideo)) return embedResult;
         }
       } catch { /* continue */ }
     }
 
     // Layer 4: OG meta tags
     const ogResult = buildFromOgTags(ogTags, contentType);
-    if (ogResult) {
+    if (isUsableMediaResult(ogResult, requiresVideo)) {
       ogResult._contentType = contentType;
       return ogResult;
     }
@@ -663,4 +689,11 @@ function fetchImageAsDataUri(imageUrl) {
   });
 }
 
-module.exports = { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher };
+module.exports = {
+  fetchMediaInfo,
+  downloadImage,
+  fetchImageAsDataUri,
+  setYtdlpFetcher,
+  isInstagramVideoUrl,
+  isUsableMediaResult,
+};
