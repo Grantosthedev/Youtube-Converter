@@ -5930,16 +5930,19 @@ function showUpdateDialog(version) {
   overlay.className = 'update-dialog-overlay';
 
   overlay.innerHTML = `
-    <div class="update-dialog-panel" role="dialog" aria-modal="true">
-      <div class="update-dialog__title">${titles[state.mode] || titles.unhinged}</div>
-      <div class="update-dialog__subtitle">${subtitles[state.mode] || subtitles.unhinged}</div>
+    <div class="update-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="updateDialogTitle" aria-describedby="updateDialogSubtitle">
+      <div class="update-dialog__icon" aria-hidden="true">
+        <i class="hgi-stroke hgi-system-update-01 ui-icon"></i>
+      </div>
+      <div id="updateDialogTitle" class="update-dialog__title">${titles[state.mode] || titles.unhinged}</div>
+      <div id="updateDialogSubtitle" class="update-dialog__subtitle">${subtitles[state.mode] || subtitles.unhinged}</div>
       <div class="update-dialog__actions">
         <button class="update-dialog__btn update-dialog__btn--primary" data-choice="restart">
           <span class="update-dialog__btn-label">Restart and Update</span>
           <span class="update-dialog__btn-sub">Takes a few seconds.</span>
         </button>
+        <button class="update-dialog__cancel" data-choice="later">Later</button>
       </div>
-      <button class="update-dialog__cancel" data-choice="later">Later</button>
     </div>
   `;
 
