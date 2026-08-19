@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const Store = require('electron-store');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp } = require('./ytdlp');
 const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, checkYtdlpUpdate, ensureYtdlpFresh } = require('./updater');
+const { nextEngineReadinessError } = require('./ytdlp-readiness');
 const { isValidURL, detectPlatform, normalizeYouTubeURL, normalizeInstagramURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = require('./media-fetcher');
 
@@ -839,16 +840,14 @@ ipcMain.handle('set-setting', async (_event, key, value) => {
 ipcMain.handle('update-ytdlp', async () => {
   if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
   const result = await updateYtdlp();
-  if (result.success) ytdlpReadyError = null;
-  else ytdlpReadyError = result.error || 'Update failed';
+  ytdlpReadyError = nextEngineReadinessError(ytdlpReadyError, result);
   return result;
 });
 
 ipcMain.handle('check-ytdlp-update', async () => {
   if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
   const result = await checkYtdlpUpdate();
-  if (result.success) ytdlpReadyError = null;
-  else ytdlpReadyError = result.error || 'Update check failed';
+  ytdlpReadyError = nextEngineReadinessError(ytdlpReadyError, result);
   return result;
 });
 
