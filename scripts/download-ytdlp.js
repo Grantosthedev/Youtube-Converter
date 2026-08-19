@@ -38,7 +38,12 @@ function getBuffer(url, redirects = 0) {
       reject(new Error('Too many redirects'));
       return;
     }
-    https.get(url, { headers: { 'User-Agent': 'Downroad' } }, (res) => {
+    const headers = { 'User-Agent': 'Downroad' };
+    if (process.env.GITHUB_TOKEN && new URL(url).hostname === 'api.github.com') {
+      headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+      headers.Accept = 'application/vnd.github+json';
+    }
+    https.get(url, { headers }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         getBuffer(res.headers.location, redirects + 1).then(resolve).catch(reject);
