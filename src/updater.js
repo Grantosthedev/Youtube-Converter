@@ -221,6 +221,18 @@ function shouldThrottleYtdlpCheck({ currentVersion, metadata, storedState, now =
   );
 }
 
+function preserveSupportedEngine(currentVersion, updateResult) {
+  if (updateResult?.success || !currentVersion || !isSupportedYtdlpVersion(currentVersion)) {
+    return updateResult;
+  }
+  return {
+    success: true,
+    version: currentVersion,
+    skipped: true,
+    updateError: updateResult?.error || 'Optional engine update failed',
+  };
+}
+
 async function installReleaseAsset(asset, options = {}) {
   const userBinDir = options.userBinDir || getUserBinDir();
   const destPath = options.destPath || path.join(userBinDir, 'yt-dlp_macos');
@@ -230,6 +242,11 @@ async function installReleaseAsset(asset, options = {}) {
   const validate = options.validate || testBinary;
   const prepare = options.prepare || stripQuarantine;
   const writeMetadata = options.writeMetadata || writeEngineMetadata;
+  const currentVersion = options.currentVersion;
+
+  if (currentVersion && compareYtdlpVersions(asset.version, currentVersion) === -1) {
+    return { success: true, version: currentVersion, channel: YTDLP_CHANNEL, skipped: true };
+  }
 
   fs.mkdirSync(userBinDir, { recursive: true });
   try {
@@ -342,13 +359,22 @@ async function initializeYtdlpInternal() {
 
 async function performYtdlpUpdate() {
   try {
-    console.log(`[updater] Resolving yt-dlp ${YTDLP_CHANNEL} release`);
+    const currentVersion = await getCurrentYtdlpVersion();
+    console.log(`[updater] Resolving reviewed yt-dlp ${YTDLP_CHANNEL} release`);
     const release = await githubGet(YTDLP_RELEASE_API);
     const asset = releaseAsset(release);
     if (!isSupportedYtdlpVersion(asset.version)) {
       throw new Error(`Latest nightly ${asset.version} predates ${MINIMUM_FIXED_YTDLP_VERSION}`);
     }
-    const result = await installReleaseAsset(asset);
+    if (
+      currentVersion
+      && isSupportedYtdlpVersion(currentVersion)
+      && compareYtdlpVersions(asset.version, currentVersion) === -1
+    ) {
+      console.log(`[updater] Keeping newer yt-dlp ${currentVersion}; reviewed build is ${asset.version}`);
+      return { success: true, version: currentVersion, skipped: true };
+    }
+    const result = await installReleaseAsset(asset, { currentVersion });
     console.log(`[updater] Installed yt-dlp ${result.channel}@${result.version}`);
     return result;
   } catch (err) {
@@ -416,7 +442,12 @@ async function ensureYtdlpFresh(store) {
     }
     if (!current || !isSupportedYtdlpVersion(current) || metadata?.channel !== YTDLP_CHANNEL) {
       console.log('[updater] yt-dlp is missing, stale, or on the wrong channel; updating...');
-      return await updateYtdlp();
+      const result = await updateYtdlp();
+      const readinessResult = preserveSupportedEngine(current, result);
+      if (readinessResult !== result) {
+        console.warn(`[updater] Keeping supported yt-dlp ${current} after optional update failure`);
+      }
+      return readinessResult;
     }
 
     const latest = await getLatestYtdlpVersion();
@@ -493,6 +524,7 @@ module.exports = {
   isNewerAppVersion,
   isNewerYtdlpVersion,
   readEngineMetadata,
+  preserveSupportedEngine,
   runYtdlpMutation,
   shouldThrottleYtdlpCheck,
   updateYtdlp,

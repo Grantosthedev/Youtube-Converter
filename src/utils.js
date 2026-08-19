@@ -121,6 +121,13 @@ function getDenoPath() {
   return path.join(__dirname, '..', 'bin', 'deno');
 }
 
+function getRuntimeManifestPath() {
+  if (app?.isPackaged) {
+    return path.join(process.resourcesPath, 'runtime-manifest.json');
+  }
+  return path.join(__dirname, '..', 'bin', 'runtime-manifest.json');
+}
+
 function binaryExists(binPath) {
   try {
     fs.accessSync(binPath, fs.constants.X_OK);
@@ -176,6 +183,7 @@ module.exports = {
   getUserBinDir,
   getFfmpegPath,
   getDenoPath,
+  getRuntimeManifestPath,
   getResourcePath,
   binaryExists,
   parseTimeToSeconds,

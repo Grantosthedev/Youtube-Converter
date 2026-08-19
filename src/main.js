@@ -23,6 +23,7 @@ const Store = require('electron-store');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp } = require('./ytdlp');
 const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, checkYtdlpUpdate, ensureYtdlpFresh } = require('./updater');
 const { nextEngineReadinessError } = require('./ytdlp-readiness');
+const { validateDenoRuntime } = require('./runtime-readiness');
 const { isValidURL, detectPlatform, normalizeYouTubeURL, normalizeInstagramURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = require('./media-fetcher');
 
@@ -251,11 +252,19 @@ let mainWindow = null;
 const activeDownloads = new Map();
 let ytdlpUpdatePromise = null;
 let ytdlpReadyError = null;
+let denoReadinessPromise = null;
+let denoReadyError = null;
 
-async function awaitYtdlpReady() {
+async function awaitYtdlpReady(url) {
   if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
   if (ytdlpReadyError) {
     throw new Error(`Download engine unavailable: ${ytdlpReadyError}`);
+  }
+  if (detectPlatform(url || '') === 'youtube') {
+    if (denoReadinessPromise) await denoReadinessPromise;
+    if (denoReadyError) {
+      throw new Error(`YouTube runtime unavailable: ${denoReadyError}`);
+    }
   }
 }
 
@@ -350,10 +359,10 @@ function createWindow() {
 // --- IPC Handlers ---
 
 ipcMain.handle('fetch-video-info', async (_event, url) => {
-  await awaitYtdlpReady();
   if (!isValidURL(url)) {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
+  await awaitYtdlpReady(url);
   const platform = detectPlatform(url);
   addBreadcrumb('Fetch video info', { platform });
   const normalizedUrl = platform === 'youtube'
@@ -382,13 +391,13 @@ const VALID_QUALITY_HEIGHT = /^\d{3,4}$/;
 const TIME_FORMAT = /^\d{2}:\d{2}:\d{2}$/;
 
 ipcMain.handle('start-download', async (event, options) => {
-  await awaitYtdlpReady();
   if (!options || typeof options !== 'object') {
     throw new Error('Invalid download options, you inept noodle.');
   }
   if (!isValidURL(options.url)) {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
+  await awaitYtdlpReady(options.url);
   if (options.quality && !VALID_QUALITIES.has(options.quality) && !VALID_QUALITY_HEIGHT.test(options.quality)) {
     throw new Error('Invalid quality setting, you thick as a brick.');
   }
@@ -609,12 +618,12 @@ ipcMain.handle('start-download', async (event, options) => {
 });
 
 ipcMain.handle('fetch-media-info', async (_event, url) => {
-  await awaitYtdlpReady();
+  await awaitYtdlpReady(url);
   return await fetchMediaInfo(url);
 });
 
 ipcMain.handle('fetch-carousel-videos', async (_event, url) => {
-  await awaitYtdlpReady();
+  await awaitYtdlpReady(url);
   return await fetchCarouselVideos(url);
 });
 
@@ -1099,6 +1108,18 @@ app.on('ready', () => {
   let activityNotified = false;
   let pendingActivityResult = null;
   const needsInitialDownload = !binaryExists(getYtdlpPath());
+
+  denoReadinessPromise = validateDenoRuntime({ packaged: app.isPackaged })
+    .then((result) => {
+      denoReadyError = null;
+      Sentry.setTag('deno_version', String(result.version));
+      return result;
+    })
+    .catch((error) => {
+      denoReadyError = error?.message || 'Deno runtime validation failed';
+      console.error('[startup] YouTube runtime is not ready:', denoReadyError);
+      return null;
+    });
 
   ytdlpUpdatePromise = (async () => {
     if (needsInitialDownload) {

@@ -23,18 +23,29 @@ test('rejects engines older than the confirmed YouTube fix', () => {
 
 test('selects an exact release asset with a GitHub SHA-256 digest', () => {
   const selected = releaseAsset({
+    tag_name: MINIMUM_FIXED_YTDLP_VERSION,
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+      digest: `sha256:${MINIMUM_FIXED_YTDLP_SHA256}`,
+      size: 123,
+    }],
+  });
+
+  assert.equal(selected.version, MINIMUM_FIXED_YTDLP_VERSION);
+  assert.equal(selected.sha256, MINIMUM_FIXED_YTDLP_SHA256);
+  assert.equal(selected.size, 123);
+});
+
+test('rejects releases not pinned in the signed application source', () => {
+  assert.throws(() => releaseAsset({
     tag_name: '2026.08.19.000001',
     assets: [{
       name: 'yt-dlp_macos',
       browser_download_url: 'https://example.com/yt-dlp_macos',
       digest: `sha256:${'a'.repeat(64)}`,
-      size: 123,
     }],
-  });
-
-  assert.equal(selected.version, '2026.08.19.000001');
-  assert.equal(selected.sha256, 'a'.repeat(64));
-  assert.equal(selected.size, 123);
+  }), /Unreviewed/);
 });
 
 test('pins the reviewed emergency build digest in source', () => {

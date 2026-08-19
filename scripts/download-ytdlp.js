@@ -127,7 +127,8 @@ async function installDeno() {
     version: DENO_VERSION,
     asset: asset.name,
     archiveSha256: asset.archiveSha256,
-    sha256: asset.binarySha256,
+    upstreamSha256: asset.binarySha256,
+    sha256: crypto.createHash('sha256').update(fs.readFileSync(DENO_PATH)).digest('hex'),
   };
 }
 
@@ -143,6 +144,7 @@ async function download() {
     console.log(`Downloading yt-dlp ${ytdlpAsset.version} (${ytdlpAsset.sha256.slice(0, 12)}...)...`);
     await downloadVerified(ytdlpAsset.downloadUrl, ytdlpAsset.sha256, YTDLP_PATH);
     prepBinary(YTDLP_PATH);
+    const bundledYtdlpSha256 = crypto.createHash('sha256').update(fs.readFileSync(YTDLP_PATH)).digest('hex');
     createGzBundle(YTDLP_PATH, YTDLP_GZ_PATH);
 
     const deno = await installDeno();
@@ -150,7 +152,8 @@ async function download() {
       ytdlp: {
         channel: 'nightly',
         version: ytdlpAsset.version,
-        sha256: ytdlpAsset.sha256,
+        upstreamSha256: ytdlpAsset.sha256,
+        sha256: bundledYtdlpSha256,
       },
       deno,
       architecture: TARGET_ARCH,

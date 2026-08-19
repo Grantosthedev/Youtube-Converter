@@ -7,6 +7,7 @@ const path = require('node:path');
 const {
   installReleaseAsset,
   isNewerAppVersion,
+  preserveSupportedEngine,
   readEngineMetadata,
   runYtdlpMutation,
   shouldThrottleYtdlpCheck,
@@ -48,6 +49,17 @@ test('compares semantic application versions independently of yt-dlp dates', () 
   assert.equal(isNewerAppVersion('2.0.0', '1.99.99'), true);
 });
 
+test('keeps a supported engine ready when optional channel migration is offline', () => {
+  assert.deepEqual(
+    preserveSupportedEngine(FIXED_VERSION, { success: false, error: 'offline' }),
+    { success: true, version: FIXED_VERSION, skipped: true, updateError: 'offline' },
+  );
+  assert.deepEqual(
+    preserveSupportedEngine('2026.07.04', { success: false, error: 'offline' }),
+    { success: false, error: 'offline' },
+  );
+});
+
 test('coalesces concurrent engine mutations into one operation', async () => {
   let runs = 0;
   let release;
@@ -84,6 +96,25 @@ test('installs a validated candidate atomically and records its channel', async 
   assert.equal(fs.readFileSync(dest, 'utf8'), 'new');
   assert.equal(fs.readFileSync(`${dest}.previous`, 'utf8'), 'old');
   assert.equal(readEngineMetadata(dir).channel, 'nightly');
+});
+
+test('never replaces a newer working engine with the reviewed baseline', async (t) => {
+  const dir = tempDir(t);
+  const dest = path.join(dir, 'yt-dlp_macos');
+  fs.writeFileSync(dest, 'newer');
+  let downloaded = false;
+
+  const result = await installReleaseAsset(ASSET, {
+    userBinDir: dir,
+    destPath: dest,
+    currentVersion: '2026.08.19.000001',
+    download: async () => { downloaded = true; },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.skipped, true);
+  assert.equal(downloaded, false);
+  assert.equal(fs.readFileSync(dest, 'utf8'), 'newer');
 });
 
 test('restores the previous engine when post-install validation fails', async (t) => {

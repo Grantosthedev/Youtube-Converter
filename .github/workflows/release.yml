@@ -22,6 +22,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm ci
 
+      - name: Verify release identity and architecture
+        run: |
+          EXPECTED_TAG="v$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "$EXPECTED_TAG"
+          test "$(node -p "process.arch")" = "arm64"
+          test "$(node -p "require('./bin/runtime-manifest.json').architecture")" = "arm64"
+
+      - name: Verify release inputs
+        run: npm run verify
+
       - name: Import signing certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -42,6 +52,21 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run publish
+
+      - name: Verify signed app and YouTube runtime
+        run: |
+          APP_PATH="out/Downroad-darwin-arm64/Downroad.app"
+          RESOURCES="$APP_PATH/Contents/Resources"
+          ENGINE="$RUNNER_TEMP/yt-dlp_macos"
+          test -d "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign --verify --strict --verbose=2 "$RESOURCES/deno"
+          "$RESOURCES/deno" --version
+          gzip -dc "$RESOURCES/yt-dlp_macos.gz" > "$ENGINE"
+          chmod +x "$ENGINE"
+          codesign --force --sign - "$ENGINE"
+          "$ENGINE" --js-runtimes "deno:$RESOURCES/deno" --simulate --no-playlist \
+            "https://www.youtube.com/watch?v=BaW_jenozKc"
 
       - name: Make release live
         env:
