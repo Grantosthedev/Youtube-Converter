@@ -2,6 +2,7 @@ require('dotenv').config();
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 const path = require('path');
+const { signRuntimeDirectory } = require('./scripts/sign-bundled-runtimes');
 
 module.exports = {
   packagerConfig: {
@@ -12,7 +13,7 @@ module.exports = {
     appBundleId: 'com.grantosthedev.downroad',
     icon: path.join(__dirname, 'assets', 'icon'),
     extraResource: [
-      path.join(__dirname, 'bin', 'yt-dlp_macos.gz'),
+      path.join(__dirname, 'bin', 'yt-dlp_macos'),
       path.join(__dirname, 'bin', 'deno'),
       path.join(__dirname, 'bin', 'runtime-manifest.json'),
     ],
@@ -45,7 +46,13 @@ module.exports = {
       appleId: process.env.APPLE_ID,
       appleIdPassword: process.env.APPLE_ID_PASSWORD,
       teamId: process.env.APPLE_TEAM_ID,
-    }
+    },
+    afterSign: async (context) => {
+      if (context.electronPlatformName !== 'darwin') return;
+      const appName = context.packager.appInfo.productFilename;
+      const resourcesDir = path.join(context.appOutDir, `${appName}.app`, 'Contents', 'Resources');
+      signRuntimeDirectory(resourcesDir);
+    },
   },
   rebuildConfig: {},
   makers: [
