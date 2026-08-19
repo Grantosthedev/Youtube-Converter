@@ -297,11 +297,11 @@ async function initializeYtdlpInternal() {
   const userBinDir = getUserBinDir();
   fs.mkdirSync(userBinDir, { recursive: true });
   const destPath = path.join(userBinDir, 'yt-dlp_macos');
-  const bundledGzPath = getBundledYtdlpPath();
+  const bundledPath = getBundledYtdlpPath();
 
   let hasBundled = false;
   try {
-    fs.accessSync(bundledGzPath, fs.constants.R_OK);
+    fs.accessSync(bundledPath, fs.constants.R_OK);
     hasBundled = true;
   } catch {}
 
@@ -311,11 +311,12 @@ async function initializeYtdlpInternal() {
   }
 
   try {
-    console.log('[updater] Decompressing bundled yt-dlp to userData...');
-    const compressed = fs.readFileSync(bundledGzPath);
-    const decompressed = zlib.gunzipSync(compressed);
+    console.log('[updater] Installing bundled yt-dlp to userData...');
+    const bundledData = bundledPath.endsWith('.gz')
+      ? zlib.gunzipSync(fs.readFileSync(bundledPath))
+      : fs.readFileSync(bundledPath);
     const candidatePath = `${destPath}.bundled-${process.pid}`;
-    fs.writeFileSync(candidatePath, decompressed, { mode: 0o755 });
+    fs.writeFileSync(candidatePath, bundledData, { mode: 0o755 });
     await stripQuarantine(candidatePath);
 
     const version = await testBinary(candidatePath);

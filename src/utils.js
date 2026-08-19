@@ -84,9 +84,15 @@ function getUserBinDir() {
 
 function getBundledYtdlpPath() {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'yt-dlp_macos.gz');
+    return path.join(process.resourcesPath, 'yt-dlp_macos');
   }
-  return path.join(__dirname, '..', 'bin', 'yt-dlp_macos.gz');
+  const gzPath = path.join(__dirname, '..', 'bin', 'yt-dlp_macos.gz');
+  try {
+    fs.accessSync(gzPath, fs.constants.R_OK);
+    return gzPath;
+  } catch {
+    return path.join(__dirname, '..', 'bin', 'yt-dlp_macos');
+  }
 }
 
 function getYtdlpPath() {
