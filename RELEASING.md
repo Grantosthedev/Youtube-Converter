@@ -6,14 +6,13 @@ How to push updates to all Downroad users.
 
 ```bash
 # 1. Bump version in package.json
-# 2. Write release notes
-#    Edit RELEASE_NOTES.md (gitignored — rewrite it each release)
-# 3. Build, sign, notarize, publish, and auto-fill notes
-npm run publish
-# 4. Go to GitHub Releases, find the draft, click "Publish release"
+# 2. Update and commit RELEASE_NOTES.md
+# 3. Tag and push. CI signs, notarizes, publishes, and makes the release live.
+git tag v1.5.3
+git push origin v1.5.3
 ```
 
-That's it. Notes are auto-pushed to the GitHub draft by the `postpublish` script.
+That's it. Notes are applied by the `postpublish` script before CI makes the release live.
 Users get prompted to restart within 6 hours (or immediately via the Settings gear).
 
 > **DMG build fails?** macOS 15 (Sequoia) blocks `cp -R` when copying a Hardened
@@ -37,28 +36,23 @@ Open `package.json` and increment the `version` field following semver:
 
 ### 2. Write release notes
 
-Edit `RELEASE_NOTES.md` in the project root (it's gitignored). Write whatever you want users to see on the GitHub release page. Markdown is supported.
+Edit and commit `RELEASE_NOTES.md` in the project root. Markdown is supported.
 
-### 3. Build and publish
+### 3. Tag and publish through CI
 
 ```bash
-npm run publish
+git tag v1.5.3
+git push origin v1.5.3
 ```
 
-This does everything in one command:
+The release workflow:
 - Packages the app for macOS (arm64)
 - Code signs with your Developer ID certificate
 - Notarizes with Apple (takes 1-2 min)
 - Creates a ZIP (for auto-updates) and DMG (for manual installs)
 - Uploads both to a draft GitHub Release tagged with the version
-- Automatically pushes your `RELEASE_NOTES.md` to the draft release body
-
-### 4. Publish the GitHub Release
-
-1. Go to https://github.com/Grantosthedev/Youtube-Converter/releases
-2. Find the draft release (e.g. `v1.3.1`)
-3. Add release notes if you want
-4. Click **Publish release**
+- Pushes `RELEASE_NOTES.md` to the release body
+- Publishes the release so installed apps can update
 
 ### 4. Users get updated
 

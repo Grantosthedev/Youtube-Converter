@@ -11,7 +11,11 @@ module.exports = {
     name: 'Downroad',
     appBundleId: 'com.grantosthedev.downroad',
     icon: path.join(__dirname, 'assets', 'icon'),
-    extraResource: [],
+    extraResource: [
+      path.join(__dirname, 'bin', 'yt-dlp_macos.gz'),
+      path.join(__dirname, 'bin', 'deno'),
+      path.join(__dirname, 'bin', 'runtime-manifest.json'),
+    ],
     ignore: [
       /^\/bin($|\/)/,
       /^\/assets($|\/)/,
@@ -23,6 +27,7 @@ module.exports = {
       /^\/\.env$/,
       /^\/\.gitignore$/,
       /^\/README\.md$/i,
+      /^\/RELEASE_NOTES\.md$/i,
       /^\/forge\.config\.js$/,
       /\.d\.ts$/,
       /\.js\.map$/,

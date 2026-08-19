@@ -4,7 +4,7 @@ const EXPECTED_ERROR_PATTERNS = [
   /unsupported url|url type isn't supported|isn't supported via this method/i,
   /private|requires? login|age.?restrict/i,
   /unavailable|removed|deleted|not available in your (?:country|region)/i,
-  /rate.?limit|http error 429|http error 403|forbidden/i,
+  /rate.?limit|http error 429|429 too many requests/i,
   /network error|timed out|connection|couldn't reach|check your internet|certificate|ssl/i,
   /disk (?:space|is almost full)|not enough disk|cannot (?:save|write)/i,
   /download cancelled|request timed out/i,
@@ -17,7 +17,34 @@ const PLATFORM_ERROR_PATTERNS = [
   /yt-dlp (?:is )?outdated|can't decrypt/i,
   /module(?:notfound)?error|importerror|traceback/i,
   /yt-dlp binary is corrupted|unable to download webpage/i,
+  /platform rejected this video stream|http error 403|403 forbidden/i,
+  /youtube challenge support|playback session|unsupported stream/i,
 ];
+
+const EXPECTED_REASON_CODES = new Set([
+  'age_restricted',
+  'certificate_error',
+  'disk_full',
+  'incomplete_download',
+  'invalid_url',
+  'login_required',
+  'network_error',
+  'private_content',
+  'rate_limited',
+  'region_blocked',
+  'unavailable',
+  'unsupported_url',
+]);
+
+const PLATFORM_REASON_CODES = new Set([
+  'access_forbidden',
+  'engine_corrupt',
+  'extractor_regression',
+  'js_runtime_missing',
+  'platform_unreachable',
+  'po_token_required',
+  'sabr_only',
+]);
 
 const SENSITIVE_KEY = /(?:^|_)(?:url|uri|path|filepath|clipboard|history|project|username|email)(?:$|_)/i;
 const URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]+/gi;
@@ -43,6 +70,12 @@ function classifyError(error) {
   if (EXPECTED_ERROR_PATTERNS.some(pattern => pattern.test(message))) return 'expected';
   if (PLATFORM_ERROR_PATTERNS.some(pattern => pattern.test(message))) return 'platform';
   return 'bug';
+}
+
+function classifyReasonCode(reasonCode, error) {
+  if (EXPECTED_REASON_CODES.has(reasonCode)) return 'expected';
+  if (PLATFORM_REASON_CODES.has(reasonCode)) return 'platform';
+  return classifyError(error);
 }
 
 function scrubString(value) {
@@ -110,7 +143,9 @@ function fingerprintFor(classification, context = {}) {
 }
 
 function reportError(error, context = {}) {
-  const classification = classifyError(error);
+  const classification = context.reasonCode
+    ? classifyReasonCode(context.reasonCode, error)
+    : classifyError(error);
   if (!sentry || classification === 'expected') return null;
 
   const exception = error instanceof Error ? error : new Error(errorMessage(error));
@@ -122,6 +157,10 @@ function reportError(error, context = {}) {
     if (context.mediaType) scope.setTag('media_type', safeTag(context.mediaType));
     if (context.quality) scope.setTag('quality', safeTag(context.quality));
     if (context.ytdlpVersion) scope.setTag('ytdlp_version', safeTag(context.ytdlpVersion));
+    if (context.ytdlpChannel) scope.setTag('ytdlp_channel', safeTag(context.ytdlpChannel));
+    if (context.reasonCode) scope.setTag('reason_code', safeTag(context.reasonCode));
+    if (context.httpStatus) scope.setTag('http_status', safeTag(context.httpStatus));
+    if (context.architecture) scope.setTag('architecture', safeTag(context.architecture));
 
     const fingerprint = fingerprintFor(classification, context);
     if (fingerprint) scope.setFingerprint(fingerprint);
@@ -144,6 +183,7 @@ function addBreadcrumb(message, context = {}) {
 module.exports = {
   addBreadcrumb,
   classifyError,
+  classifyReasonCode,
   configureSentryReporting,
   errorMessage,
   fingerprintFor,

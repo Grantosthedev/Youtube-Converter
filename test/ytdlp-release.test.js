@@ -1,0 +1,80 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  MINIMUM_FIXED_YTDLP_SHA256,
+  MINIMUM_FIXED_YTDLP_VERSION,
+  compareYtdlpVersions,
+  isSupportedYtdlpVersion,
+  releaseAsset,
+} = require('../src/ytdlp-release');
+
+test('orders stable and nightly timestamp versions numerically', () => {
+  assert.equal(compareYtdlpVersions('2026.08.18.122307', '2026.07.04'), 1);
+  assert.equal(compareYtdlpVersions('nightly@2026.08.19.1', '2026.08.18.999999'), 1);
+  assert.equal(compareYtdlpVersions('2026.08.18.122307', '2026.08.18.122307'), 0);
+  assert.equal(compareYtdlpVersions('garbage', '2026.08.18.122307'), null);
+});
+
+test('rejects engines older than the confirmed YouTube fix', () => {
+  assert.equal(isSupportedYtdlpVersion('2026.07.04'), false);
+  assert.equal(isSupportedYtdlpVersion(MINIMUM_FIXED_YTDLP_VERSION), true);
+});
+
+test('selects an exact release asset with a GitHub SHA-256 digest', () => {
+  const selected = releaseAsset({
+    tag_name: MINIMUM_FIXED_YTDLP_VERSION,
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+      digest: `sha256:${MINIMUM_FIXED_YTDLP_SHA256}`,
+      size: 123,
+    }],
+  });
+
+  assert.equal(selected.version, MINIMUM_FIXED_YTDLP_VERSION);
+  assert.equal(selected.sha256, MINIMUM_FIXED_YTDLP_SHA256);
+  assert.equal(selected.size, 123);
+});
+
+test('rejects releases not pinned in the signed application source', () => {
+  assert.throws(() => releaseAsset({
+    tag_name: '2026.08.19.000001',
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+      digest: `sha256:${'a'.repeat(64)}`,
+    }],
+  }), /Unreviewed/);
+});
+
+test('pins the reviewed emergency build digest in source', () => {
+  const selected = releaseAsset({
+    tag_name: MINIMUM_FIXED_YTDLP_VERSION,
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+      digest: `sha256:${MINIMUM_FIXED_YTDLP_SHA256}`,
+    }],
+  });
+  assert.equal(selected.sha256, MINIMUM_FIXED_YTDLP_SHA256);
+
+  assert.throws(() => releaseAsset({
+    tag_name: MINIMUM_FIXED_YTDLP_VERSION,
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+      digest: `sha256:${'b'.repeat(64)}`,
+    }],
+  }), /reviewed build/);
+});
+
+test('refuses release assets without a trustworthy digest', () => {
+  assert.throws(() => releaseAsset({
+    tag_name: '2026.08.18.122307',
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+    }],
+  }), /SHA-256/);
+});

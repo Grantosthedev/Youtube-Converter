@@ -11,4 +11,3 @@ src/renderer/sentry-renderer.js
 *.key
 *.cert
 credentials.json
-RELEASE_NOTES.md

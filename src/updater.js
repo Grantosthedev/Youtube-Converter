@@ -1,16 +1,24 @@
 const https = require('https');
 const fs = require('fs');
 const zlib = require('zlib');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 const path = require('path');
 const { getYtdlpPath, getUserBinDir, getBundledYtdlpPath } = require('./utils');
-
-const YTDLP_RELEASES_URL = 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest';
-const YTDLP_DOWNLOAD_BASE = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+const {
+  MINIMUM_FIXED_YTDLP_VERSION,
+  YTDLP_CHANNEL,
+  YTDLP_RELEASE_API,
+  compareYtdlpVersions,
+  isSupportedYtdlpVersion,
+  releaseAsset,
+} = require('./ytdlp-release');
 
 const APP_REPO_API = 'https://api.github.com/repos/Grantosthedev/Youtube-Converter/releases/latest';
 
 const MAX_REDIRECTS = 5;
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let activeYtdlpMutation = null;
 
 function githubGet(url, redirectCount = 0) {
   return new Promise((resolve, reject) => {
@@ -49,77 +57,82 @@ function githubGet(url, redirectCount = 0) {
 
 const DOWNLOAD_INACTIVITY_TIMEOUT_MS = 60_000;
 
-function downloadFile(url, destPath) {
+function downloadFileVerified(url, destPath, expectedSha256, redirectCount = 0) {
   return new Promise((resolve, reject) => {
-    let redirects = 0;
     let settled = false;
-    const done = (fn) => { if (!settled) { settled = true; fn(); } };
+    const done = (fn) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
 
-    const follow = (u) => {
-      if (redirects >= MAX_REDIRECTS) {
-        done(() => reject(new Error('Too many redirects')));
+    if (redirectCount >= MAX_REDIRECTS) {
+      reject(new Error('Too many redirects'));
+      return;
+    }
+
+    const req = https.get(url, {
+      headers: { 'User-Agent': 'Downroad' },
+      timeout: DOWNLOAD_INACTIVITY_TIMEOUT_MS,
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        downloadFileVerified(res.headers.location, destPath, expectedSha256, redirectCount + 1)
+          .then(resolve)
+          .catch(reject);
         return;
       }
-      const req = https.get(u, {
-        headers: { 'User-Agent': 'YouTube-Clip-Downloader' },
-        timeout: DOWNLOAD_INACTIVITY_TIMEOUT_MS,
-      }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          redirects++;
-          follow(res.headers.location);
-          return;
-        }
-        if (res.statusCode !== 200) {
-          done(() => reject(new Error(`HTTP ${res.statusCode}`)));
-          return;
-        }
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
 
-        // Inactivity timeout on the response stream: if no data arrives for
-        // DOWNLOAD_INACTIVITY_TIMEOUT_MS the download is considered stalled.
-        let inactivityTimer = setTimeout(() => {
-          res.destroy();
-          done(() => reject(new Error('Download stalled: no data received within timeout')));
+      const hash = crypto.createHash('sha256');
+      const file = fs.createWriteStream(destPath, { mode: 0o755 });
+      let inactivityTimer;
+      const fail = (error) => {
+        clearTimeout(inactivityTimer);
+        file.destroy();
+        try { fs.unlinkSync(destPath); } catch {}
+        done(() => reject(error));
+      };
+      const resetTimer = () => {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          res.destroy(new Error('Download stalled: no data received within timeout'));
         }, DOWNLOAD_INACTIVITY_TIMEOUT_MS);
-        const resetTimer = () => {
-          clearTimeout(inactivityTimer);
-          inactivityTimer = setTimeout(() => {
-            res.destroy();
-            done(() => reject(new Error('Download stalled: no data received within timeout')));
-          }, DOWNLOAD_INACTIVITY_TIMEOUT_MS);
-        };
+      };
 
-        const file = fs.createWriteStream(destPath);
-        res.on('data', resetTimer);
-        res.on('error', (err) => {
-          clearTimeout(inactivityTimer);
-          file.close();
-          done(() => reject(err));
-        });
-        res.pipe(file);
-        file.on('finish', () => {
-          clearTimeout(inactivityTimer);
-          file.close();
-          fs.chmodSync(destPath, 0o755);
-          done(() => resolve());
-        });
-        file.on('error', (err) => {
-          clearTimeout(inactivityTimer);
-          done(() => reject(err));
+      resetTimer();
+      res.on('data', (chunk) => {
+        hash.update(chunk);
+        resetTimer();
+      });
+      res.on('error', fail);
+      file.on('error', fail);
+      file.on('finish', () => {
+        clearTimeout(inactivityTimer);
+        file.close(() => {
+          const actual = hash.digest('hex');
+          if (actual !== expectedSha256.toLowerCase()) {
+            try { fs.unlinkSync(destPath); } catch {}
+            done(() => reject(new Error('yt-dlp checksum verification failed')));
+            return;
+          }
+          done(() => resolve(actual));
         });
       });
-      req.on('error', (err) => done(() => reject(err)));
-      req.on('timeout', () => {
-        req.destroy();
-        done(() => reject(new Error('Connection timed out while starting download')));
-      });
-    };
-    follow(url);
+      res.pipe(file);
+    });
+    req.on('error', (err) => done(() => reject(err)));
+    req.on('timeout', () => req.destroy(new Error('Connection timed out while starting download')));
   });
 }
 
 async function getLatestYtdlpVersion() {
   try {
-    const release = await githubGet(YTDLP_RELEASES_URL);
+    const release = await githubGet(YTDLP_RELEASE_API);
     return release.tag_name;
   } catch {
     return null;
@@ -179,7 +192,108 @@ async function getCurrentYtdlpVersion() {
   return testBinary(ytdlpPath);
 }
 
-async function initializeYtdlp() {
+function engineMetadataPath(userBinDir = getUserBinDir()) {
+  return path.join(userBinDir, 'yt-dlp-release.json');
+}
+
+function readEngineMetadata(userBinDir = getUserBinDir()) {
+  try {
+    return JSON.parse(fs.readFileSync(engineMetadataPath(userBinDir), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeEngineMetadata(metadata, userBinDir = getUserBinDir()) {
+  const target = engineMetadataPath(userBinDir);
+  const temp = `${target}.tmp`;
+  fs.writeFileSync(temp, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temp, target);
+}
+
+function shouldThrottleYtdlpCheck({ currentVersion, metadata, storedState, now = Date.now() }) {
+  const checkedAt = Math.max(Number(metadata?.checkedAt) || 0, Number(storedState?.checkedAt) || 0);
+  return Boolean(
+    currentVersion
+    && isSupportedYtdlpVersion(currentVersion)
+    && metadata?.channel === YTDLP_CHANNEL
+    && (now - checkedAt) < CHECK_INTERVAL_MS
+  );
+}
+
+function preserveSupportedEngine(currentVersion, updateResult) {
+  if (updateResult?.success || !currentVersion || !isSupportedYtdlpVersion(currentVersion)) {
+    return updateResult;
+  }
+  return {
+    success: true,
+    version: currentVersion,
+    skipped: true,
+    updateError: updateResult?.error || 'Optional engine update failed',
+  };
+}
+
+async function installReleaseAsset(asset, options = {}) {
+  const userBinDir = options.userBinDir || getUserBinDir();
+  const destPath = options.destPath || path.join(userBinDir, 'yt-dlp_macos');
+  const backupPath = `${destPath}.previous`;
+  const candidatePath = `${destPath}.download-${process.pid}-${Date.now()}`;
+  const download = options.download || downloadFileVerified;
+  const validate = options.validate || testBinary;
+  const prepare = options.prepare || stripQuarantine;
+  const writeMetadata = options.writeMetadata || writeEngineMetadata;
+  const currentVersion = options.currentVersion;
+
+  if (currentVersion && compareYtdlpVersions(asset.version, currentVersion) === -1) {
+    return { success: true, version: currentVersion, channel: YTDLP_CHANNEL, skipped: true };
+  }
+
+  fs.mkdirSync(userBinDir, { recursive: true });
+  try {
+    await download(asset.downloadUrl, candidatePath, asset.sha256);
+    fs.chmodSync(candidatePath, 0o755);
+    await prepare(candidatePath);
+
+    const candidateVersion = await validate(candidatePath);
+    if (!candidateVersion || compareYtdlpVersions(candidateVersion, asset.version) !== 0) {
+      throw new Error(`Downloaded yt-dlp version did not match ${asset.version}`);
+    }
+    if (!isSupportedYtdlpVersion(candidateVersion)) {
+      throw new Error(`yt-dlp ${candidateVersion} predates the required YouTube fix`);
+    }
+
+    try { fs.unlinkSync(backupPath); } catch {}
+    let movedExisting = false;
+    if (fs.existsSync(destPath)) {
+      fs.renameSync(destPath, backupPath);
+      movedExisting = true;
+    }
+
+    try {
+      fs.renameSync(candidatePath, destPath);
+      const installedVersion = await validate(destPath);
+      if (!installedVersion || compareYtdlpVersions(installedVersion, candidateVersion) !== 0) {
+        throw new Error('Installed yt-dlp failed its post-install validation');
+      }
+      writeMetadata({
+        channel: YTDLP_CHANNEL,
+        version: candidateVersion,
+        sha256: asset.sha256,
+        checkedAt: Date.now(),
+      }, userBinDir);
+    } catch (error) {
+      try { fs.unlinkSync(destPath); } catch {}
+      if (movedExisting && fs.existsSync(backupPath)) fs.renameSync(backupPath, destPath);
+      throw error;
+    }
+
+    return { success: true, version: candidateVersion, channel: YTDLP_CHANNEL };
+  } finally {
+    try { fs.unlinkSync(candidatePath); } catch {}
+  }
+}
+
+async function initializeYtdlpInternal() {
   const userBinDir = getUserBinDir();
   fs.mkdirSync(userBinDir, { recursive: true });
   const destPath = path.join(userBinDir, 'yt-dlp_macos');
@@ -193,115 +307,119 @@ async function initializeYtdlp() {
 
   if (!hasBundled) {
     console.log('[updater] No bundled yt-dlp found, falling back to download');
-    return updateYtdlp();
+    return performYtdlpUpdate();
   }
 
   try {
     console.log('[updater] Decompressing bundled yt-dlp to userData...');
     const compressed = fs.readFileSync(bundledGzPath);
     const decompressed = zlib.gunzipSync(compressed);
-    fs.writeFileSync(destPath, decompressed);
-    fs.chmodSync(destPath, 0o755);
-    await stripQuarantine(destPath);
+    const candidatePath = `${destPath}.bundled-${process.pid}`;
+    fs.writeFileSync(candidatePath, decompressed, { mode: 0o755 });
+    await stripQuarantine(candidatePath);
 
-    const version = await testBinary(destPath);
-    if (version) {
+    const version = await testBinary(candidatePath);
+    if (version && isSupportedYtdlpVersion(version)) {
+      const backupPath = `${destPath}.previous`;
+      try { fs.unlinkSync(backupPath); } catch {}
+      let movedExisting = false;
+      if (fs.existsSync(destPath)) {
+        fs.renameSync(destPath, backupPath);
+        movedExisting = true;
+      }
+      try {
+        fs.renameSync(candidatePath, destPath);
+        const installedVersion = await testBinary(destPath);
+        if (!installedVersion || compareYtdlpVersions(installedVersion, version) !== 0) {
+          throw new Error('Bundled yt-dlp failed its post-install validation');
+        }
+        writeEngineMetadata({
+          channel: YTDLP_CHANNEL,
+          version,
+          bundled: true,
+          checkedAt: Date.now(),
+        }, userBinDir);
+      } catch (error) {
+        try { fs.unlinkSync(destPath); } catch {}
+        if (movedExisting && fs.existsSync(backupPath)) fs.renameSync(backupPath, destPath);
+        throw error;
+      }
       console.log(`[updater] Bundled yt-dlp ready: v${version}`);
-      return { success: true, version };
+      return { success: true, version, channel: YTDLP_CHANNEL };
     }
 
-    console.log('[updater] Bundled binary failed validation, trying download');
-    return updateYtdlp();
+    try { fs.unlinkSync(candidatePath); } catch {}
+    console.log('[updater] Bundled binary is stale or invalid, trying download');
+    return performYtdlpUpdate();
   } catch (err) {
     console.error('[updater] Failed to initialize from bundle:', err.message);
-    return updateYtdlp();
+    return performYtdlpUpdate();
   }
 }
 
-async function updateYtdlp() {
-  const userBinDir = getUserBinDir();
-  fs.mkdirSync(userBinDir, { recursive: true });
-  const destPath = path.join(userBinDir, 'yt-dlp_macos');
-  const backupPath = destPath + '.backup';
-
-  const MAX_ATTEMPTS = 2;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      if (attempt === 1 && fs.existsSync(destPath)) {
-        fs.copyFileSync(destPath, backupPath);
-      }
-
-      console.log(`[updater] Download attempt ${attempt}/${MAX_ATTEMPTS}`);
-      await downloadFile(YTDLP_DOWNLOAD_BASE, destPath);
-
-      const stat = fs.statSync(destPath);
-      console.log(`[updater] Downloaded file size: ${stat.size} bytes`);
-      if (stat.size < 1000) {
-        const content = fs.readFileSync(destPath, 'utf8').substring(0, 200);
-        console.error('[updater] File too small, contents:', content);
-        throw new Error('Downloaded file is too small – may be an error page');
-      }
-
-      fs.chmodSync(destPath, 0o755);
-      await stripQuarantine(destPath);
-
-      const version = await testBinary(destPath);
-      if (version) {
-        console.log(`[updater] Binary validated: v${version}`);
-        try { fs.unlinkSync(backupPath); } catch {}
-        return { success: true, version };
-      }
-
-      console.log(`[updater] Binary validation failed on attempt ${attempt}`);
-      if (attempt < MAX_ATTEMPTS) continue;
-
-      try { fs.unlinkSync(destPath); } catch {}
-      if (fs.existsSync(backupPath)) {
-        try { fs.unlinkSync(backupPath); } catch {}
-      }
-      return {
-        success: false,
-        error: 'yt-dlp binary could not be executed after downloading. '
-          + 'macOS may be blocking it. Try opening System Settings → Privacy & Security '
-          + 'and clicking "Allow Anyway", then restart the app.',
-      };
-    } catch (err) {
-      console.error(`[updater] Attempt ${attempt} error:`, err.message);
-      if (attempt < MAX_ATTEMPTS) continue;
-
-      if (fs.existsSync(backupPath)) {
-        try {
-          fs.copyFileSync(backupPath, destPath);
-          fs.unlinkSync(backupPath);
-        } catch { /* backup restore failed too */ }
-      }
-      return { success: false, error: err.message };
+async function performYtdlpUpdate() {
+  try {
+    const currentVersion = await getCurrentYtdlpVersion();
+    console.log(`[updater] Resolving reviewed yt-dlp ${YTDLP_CHANNEL} release`);
+    const release = await githubGet(YTDLP_RELEASE_API);
+    const asset = releaseAsset(release);
+    if (!isSupportedYtdlpVersion(asset.version)) {
+      throw new Error(`Latest nightly ${asset.version} predates ${MINIMUM_FIXED_YTDLP_VERSION}`);
     }
+    if (
+      currentVersion
+      && isSupportedYtdlpVersion(currentVersion)
+      && compareYtdlpVersions(asset.version, currentVersion) === -1
+    ) {
+      console.log(`[updater] Keeping newer yt-dlp ${currentVersion}; reviewed build is ${asset.version}`);
+      return { success: true, version: currentVersion, skipped: true };
+    }
+    const result = await installReleaseAsset(asset, { currentVersion });
+    console.log(`[updater] Installed yt-dlp ${result.channel}@${result.version}`);
+    return result;
+  } catch (err) {
+    console.error('[updater] yt-dlp update failed:', err.message);
+    return { success: false, error: err.message };
   }
 }
 
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+function runYtdlpMutation(task) {
+  if (activeYtdlpMutation) return activeYtdlpMutation;
+  activeYtdlpMutation = Promise.resolve()
+    .then(task)
+    .finally(() => {
+      activeYtdlpMutation = null;
+    });
+  return activeYtdlpMutation;
+}
+
+function initializeYtdlp() {
+  return runYtdlpMutation(initializeYtdlpInternal);
+}
+
+function updateYtdlp() {
+  return runYtdlpMutation(performYtdlpUpdate);
+}
 
 async function checkYtdlpUpdate() {
   try {
     const current = await getCurrentYtdlpVersion();
-    if (!current) {
-      console.log('[updater] yt-dlp version unknown, attempting update...');
+    const metadata = readEngineMetadata();
+    if (!current || !isSupportedYtdlpVersion(current) || metadata?.channel !== YTDLP_CHANNEL) {
+      console.log('[updater] yt-dlp is missing, stale, or on the wrong channel; updating...');
       return await updateYtdlp();
     }
 
     const latest = await getLatestYtdlpVersion();
     if (!latest) return { success: true, version: current, skipped: true };
 
-    const currentClean = current.replace(/[^0-9.]/g, '');
-    const latestClean = latest.replace(/[^0-9.]/g, '');
-
-    if (isNewerVersion(latestClean, currentClean)) {
+    if (isNewerYtdlpVersion(latest, current)) {
       console.log(`[updater] yt-dlp outdated (${current} → ${latest}), updating...`);
       return await updateYtdlp();
     }
 
-    return { success: true, version: current, skipped: true };
+    writeEngineMetadata({ ...metadata, channel: YTDLP_CHANNEL, version: current, checkedAt: Date.now() });
+    return { success: true, version: current, channel: YTDLP_CHANNEL, skipped: true };
   } catch (err) {
     console.error('[updater] yt-dlp update check failed:', err.message);
     return { success: false, error: err.message };
@@ -310,43 +428,62 @@ async function checkYtdlpUpdate() {
 
 async function ensureYtdlpFresh(store) {
   try {
-    if (store) {
-      const lastCheck = store.get('lastYtdlpCheck');
-      if (lastCheck && (Date.now() - lastCheck) < CHECK_INTERVAL_MS) {
-        return { success: true, skipped: true };
-      }
-    }
-
     const current = await getCurrentYtdlpVersion();
-    if (!current) {
-      console.log('[updater] yt-dlp version unknown, attempting update...');
-      return await updateYtdlp();
+    const metadata = readEngineMetadata();
+    const storedState = store?.get('ytdlpEngineState') || {};
+    const canThrottle = shouldThrottleYtdlpCheck({
+      currentVersion: current,
+      metadata,
+      storedState,
+    });
+
+    if (canThrottle) {
+      return { success: true, version: current, channel: YTDLP_CHANNEL, skipped: true };
+    }
+    if (!current || !isSupportedYtdlpVersion(current) || metadata?.channel !== YTDLP_CHANNEL) {
+      console.log('[updater] yt-dlp is missing, stale, or on the wrong channel; updating...');
+      const result = await updateYtdlp();
+      const readinessResult = preserveSupportedEngine(current, result);
+      if (readinessResult !== result) {
+        console.warn(`[updater] Keeping supported yt-dlp ${current} after optional update failure`);
+      }
+      return readinessResult;
     }
 
     const latest = await getLatestYtdlpVersion();
     if (!latest) return { success: true, version: current, skipped: true };
 
-    const currentClean = current.replace(/[^0-9.]/g, '');
-    const latestClean = latest.replace(/[^0-9.]/g, '');
-
-    if (isNewerVersion(latestClean, currentClean)) {
+    if (isNewerYtdlpVersion(latest, current)) {
       console.log(`[updater] yt-dlp outdated (${current} → ${latest}), updating...`);
       const result = await updateYtdlp();
-      if (result.success && store) store.set('lastYtdlpCheck', Date.now());
+      if (result.success && store) {
+        store.set('ytdlpEngineState', {
+          channel: YTDLP_CHANNEL,
+          version: result.version,
+          checkedAt: Date.now(),
+        });
+      }
       return result;
     }
 
-    if (store) store.set('lastYtdlpCheck', Date.now());
-    return { success: true, version: current, skipped: true };
+    const checkedState = { channel: YTDLP_CHANNEL, version: current, checkedAt: Date.now() };
+    writeEngineMetadata({ ...metadata, ...checkedState });
+    if (store) store.set('ytdlpEngineState', checkedState);
+    return { success: true, version: current, channel: YTDLP_CHANNEL, skipped: true };
   } catch (err) {
     console.error('[updater] auto-update check failed:', err.message);
     return { success: false, error: err.message };
   }
 }
 
-function isNewerVersion(latest, current) {
-  const a = latest.split('.').map(Number);
-  const b = current.split('.').map(Number);
+function isNewerYtdlpVersion(latest, current) {
+  return compareYtdlpVersions(latest, current) === 1;
+}
+
+function isNewerAppVersion(latest, current) {
+  const a = String(latest || '').split('.').map(Number);
+  const b = String(current || '').split('.').map(Number);
+  if (a.some(Number.isNaN) || b.some(Number.isNaN)) return false;
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const x = a[i] || 0;
     const y = b[i] || 0;
@@ -364,7 +501,7 @@ async function checkAppUpdate(currentVersion) {
       return { available: false, error: 'No release info returned' };
     }
     const latestVersion = tag.replace(/^v/, '').trim();
-    if (isNewerVersion(latestVersion, currentVersion)) {
+    if (isNewerAppVersion(latestVersion, currentVersion)) {
       return {
         available: true,
         version: latestVersion,
@@ -378,11 +515,21 @@ async function checkAppUpdate(currentVersion) {
 }
 
 module.exports = {
+  downloadFileVerified,
+  engineMetadataPath,
   getLatestYtdlpVersion,
   getCurrentYtdlpVersion,
   initializeYtdlp,
+  installReleaseAsset,
+  isNewerAppVersion,
+  isNewerYtdlpVersion,
+  readEngineMetadata,
+  preserveSupportedEngine,
+  runYtdlpMutation,
+  shouldThrottleYtdlpCheck,
   updateYtdlp,
   checkYtdlpUpdate,
   ensureYtdlpFresh,
   checkAppUpdate,
+  writeEngineMetadata,
 };

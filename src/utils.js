@@ -114,6 +114,20 @@ function getFfmpegPath() {
   return staticPath;
 }
 
+function getDenoPath() {
+  if (app?.isPackaged) {
+    return path.join(process.resourcesPath, 'deno');
+  }
+  return path.join(__dirname, '..', 'bin', 'deno');
+}
+
+function getRuntimeManifestPath() {
+  if (app?.isPackaged) {
+    return path.join(process.resourcesPath, 'runtime-manifest.json');
+  }
+  return path.join(__dirname, '..', 'bin', 'runtime-manifest.json');
+}
+
 function binaryExists(binPath) {
   try {
     fs.accessSync(binPath, fs.constants.X_OK);
@@ -168,6 +182,8 @@ module.exports = {
   getBundledYtdlpPath,
   getUserBinDir,
   getFfmpegPath,
+  getDenoPath,
+  getRuntimeManifestPath,
   getResourcePath,
   binaryExists,
   parseTimeToSeconds,

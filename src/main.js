@@ -22,6 +22,8 @@ const crypto = require('crypto');
 const Store = require('electron-store');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp } = require('./ytdlp');
 const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, checkYtdlpUpdate, ensureYtdlpFresh } = require('./updater');
+const { nextEngineReadinessError } = require('./ytdlp-readiness');
+const { validateDenoRuntime } = require('./runtime-readiness');
 const { isValidURL, detectPlatform, normalizeYouTubeURL, normalizeInstagramURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = require('./media-fetcher');
 
@@ -191,6 +193,7 @@ const store = new Store({
     projectSubfolders: {},
     activeProject: null,
     lastYtdlpCheck: 0,
+    ytdlpEngineState: {},
     lastCacheCleared: 0,
   },
 });
@@ -248,6 +251,22 @@ const videoInfoCache = new Map();
 let mainWindow = null;
 const activeDownloads = new Map();
 let ytdlpUpdatePromise = null;
+let ytdlpReadyError = null;
+let denoReadinessPromise = null;
+let denoReadyError = null;
+
+async function awaitYtdlpReady(url) {
+  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  if (ytdlpReadyError) {
+    throw new Error(`Download engine unavailable: ${ytdlpReadyError}`);
+  }
+  if (detectPlatform(url || '') === 'youtube') {
+    if (denoReadinessPromise) await denoReadinessPromise;
+    if (denoReadyError) {
+      throw new Error(`YouTube runtime unavailable: ${denoReadyError}`);
+    }
+  }
+}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -340,12 +359,10 @@ function createWindow() {
 // --- IPC Handlers ---
 
 ipcMain.handle('fetch-video-info', async (_event, url) => {
-  if (ytdlpUpdatePromise) {
-    await ytdlpUpdatePromise;
-  }
   if (!isValidURL(url)) {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
+  await awaitYtdlpReady(url);
   const platform = detectPlatform(url);
   addBreadcrumb('Fetch video info', { platform });
   const normalizedUrl = platform === 'youtube'
@@ -374,15 +391,13 @@ const VALID_QUALITY_HEIGHT = /^\d{3,4}$/;
 const TIME_FORMAT = /^\d{2}:\d{2}:\d{2}$/;
 
 ipcMain.handle('start-download', async (event, options) => {
-  if (ytdlpUpdatePromise) {
-    await ytdlpUpdatePromise;
-  }
   if (!options || typeof options !== 'object') {
     throw new Error('Invalid download options, you inept noodle.');
   }
   if (!isValidURL(options.url)) {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
+  await awaitYtdlpReady(options.url);
   if (options.quality && !VALID_QUALITIES.has(options.quality) && !VALID_QUALITY_HEIGHT.test(options.quality)) {
     throw new Error('Invalid quality setting, you thick as a brick.');
   }
@@ -603,11 +618,12 @@ ipcMain.handle('start-download', async (event, options) => {
 });
 
 ipcMain.handle('fetch-media-info', async (_event, url) => {
+  await awaitYtdlpReady(url);
   return await fetchMediaInfo(url);
 });
 
 ipcMain.handle('fetch-carousel-videos', async (_event, url) => {
-  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  await awaitYtdlpReady(url);
   return await fetchCarouselVideos(url);
 });
 
@@ -831,11 +847,17 @@ ipcMain.handle('set-setting', async (_event, key, value) => {
 });
 
 ipcMain.handle('update-ytdlp', async () => {
-  return await updateYtdlp();
+  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  const result = await updateYtdlp();
+  ytdlpReadyError = nextEngineReadinessError(ytdlpReadyError, result);
+  return result;
 });
 
 ipcMain.handle('check-ytdlp-update', async () => {
-  return await checkYtdlpUpdate();
+  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  const result = await checkYtdlpUpdate();
+  ytdlpReadyError = nextEngineReadinessError(ytdlpReadyError, result);
+  return result;
 });
 
 ipcMain.handle('get-ytdlp-version', async () => {
@@ -1087,6 +1109,18 @@ app.on('ready', () => {
   let pendingActivityResult = null;
   const needsInitialDownload = !binaryExists(getYtdlpPath());
 
+  denoReadinessPromise = validateDenoRuntime({ packaged: app.isPackaged })
+    .then((result) => {
+      denoReadyError = null;
+      Sentry.setTag('deno_version', String(result.version));
+      return result;
+    })
+    .catch((error) => {
+      denoReadyError = error?.message || 'Deno runtime validation failed';
+      console.error('[startup] YouTube runtime is not ready:', denoReadyError);
+      return null;
+    });
+
   ytdlpUpdatePromise = (async () => {
     if (needsInitialDownload) {
       console.log('[startup] yt-dlp not found in userData, initializing...');
@@ -1105,8 +1139,20 @@ app.on('ready', () => {
     }
     return ensureYtdlpFresh(store);
   })().then((result) => {
-    if (!result) return;
+    if (!result) {
+      ytdlpReadyError = 'Initial setup failed';
+      return;
+    }
+    if (!result.success) {
+      ytdlpReadyError = result.error || 'Required engine update failed';
+      console.error('[startup] yt-dlp is not ready:', ytdlpReadyError);
+      pendingActivityResult = { type: 'ytdlp-check', status: 'failed' };
+      if (activityNotified) sendActivity(pendingActivityResult);
+      return;
+    }
+    ytdlpReadyError = null;
     if (result.version) Sentry.setTag('ytdlp_version', String(result.version));
+    if (result.channel) Sentry.setTag('ytdlp_channel', String(result.channel));
     if (result.success && !result.skipped) {
       console.log(`[startup] yt-dlp ready: ${result.version}`);
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1117,7 +1163,8 @@ app.on('ready', () => {
       pendingActivityResult = { type: 'ytdlp-check', status: 'up-to-date' };
     }
     if (activityNotified) sendActivity(pendingActivityResult);
-  }).catch(() => {
+  }).catch((error) => {
+    ytdlpReadyError = error?.message || 'Engine setup failed';
     pendingActivityResult = { type: 'ytdlp-check', status: 'failed' };
     if (activityNotified) sendActivity(pendingActivityResult);
   }).finally(() => {

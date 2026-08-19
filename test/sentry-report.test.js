@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   classifyError,
+  classifyReasonCode,
   configureSentryReporting,
   fingerprintFor,
   reportError,
@@ -13,8 +14,17 @@ const {
 test('classifies expected user and platform failures without reporting noise', () => {
   assert.equal(classifyError(new Error('This video is private.')), 'expected');
   assert.equal(classifyError('Network error. Check your connection.'), 'expected');
+  assert.equal(classifyError('HTTP Error 429: Too Many Requests'), 'expected');
+  assert.equal(classifyError('HTTP Error 403: Forbidden'), 'platform');
+  assert.equal(classifyError('The platform rejected this video stream.'), 'platform');
   assert.equal(classifyError('nsig extraction failed because yt-dlp is outdated'), 'platform');
   assert.equal(classifyError(new TypeError('Cannot read properties of undefined')), 'bug');
+});
+
+test('classifies structured engine reasons without relying on user copy', () => {
+  assert.equal(classifyReasonCode('login_required', new Error('Verified session required')), 'expected');
+  assert.equal(classifyReasonCode('access_forbidden', new Error('Rejected')), 'platform');
+  assert.equal(classifyReasonCode('unknown_engine_error', new Error('Odd failure')), 'bug');
 });
 
 test('groups platform regressions by platform and phase', () => {
@@ -79,18 +89,29 @@ test('reports only actionable errors with safe tags and context', () => {
 
   configureSentryReporting(fakeSentry);
   assert.equal(reportError(new Error('This video is private.'), { phase: 'fetch-info' }), null);
+  assert.equal(reportError(new Error('Verified session required'), {
+    phase: 'fetch-info',
+    reasonCode: 'login_required',
+  }), null);
   assert.equal(captured.length, 0);
 
   const eventId = reportError(new TypeError('Unexpected parser failure'), {
     phase: 'parse-info',
     platform: 'youtube',
+    reasonCode: 'access_forbidden',
+    httpStatus: 403,
+    architecture: 'arm64',
     details: { url: 'https://example.com/private', filePath: '/Users/grant/file' },
   });
 
   assert.equal(eventId, 'event-id');
   assert.equal(captured.length, 1);
-  assert.equal(scopeState.tags.error_class, 'bug');
+  assert.equal(scopeState.tags.error_class, 'platform');
+  assert.equal(scopeState.level, 'warning');
   assert.equal(scopeState.tags.phase, 'parse-info');
+  assert.equal(scopeState.tags.reason_code, 'access_forbidden');
+  assert.equal(scopeState.tags.http_status, '403');
+  assert.equal(scopeState.tags.architecture, 'arm64');
   assert.equal(scopeState.contexts.failure.url, '[Filtered]');
   assert.equal(scopeState.contexts.failure.filePath, '[Filtered]');
 });
