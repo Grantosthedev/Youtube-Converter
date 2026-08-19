@@ -4,7 +4,7 @@ const EXPECTED_ERROR_PATTERNS = [
   /unsupported url|url type isn't supported|isn't supported via this method/i,
   /private|requires? login|age.?restrict/i,
   /unavailable|removed|deleted|not available in your (?:country|region)/i,
-  /rate.?limit|http error 429|http error 403|forbidden/i,
+  /rate.?limit|http error 429|429 too many requests/i,
   /network error|timed out|connection|couldn't reach|check your internet|certificate|ssl/i,
   /disk (?:space|is almost full)|not enough disk|cannot (?:save|write)/i,
   /download cancelled|request timed out/i,
@@ -17,6 +17,8 @@ const PLATFORM_ERROR_PATTERNS = [
   /yt-dlp (?:is )?outdated|can't decrypt/i,
   /module(?:notfound)?error|importerror|traceback/i,
   /yt-dlp binary is corrupted|unable to download webpage/i,
+  /platform rejected this video stream|http error 403|403 forbidden/i,
+  /youtube challenge support|playback session|unsupported stream/i,
 ];
 
 const SENSITIVE_KEY = /(?:^|_)(?:url|uri|path|filepath|clipboard|history|project|username|email)(?:$|_)/i;
@@ -122,6 +124,10 @@ function reportError(error, context = {}) {
     if (context.mediaType) scope.setTag('media_type', safeTag(context.mediaType));
     if (context.quality) scope.setTag('quality', safeTag(context.quality));
     if (context.ytdlpVersion) scope.setTag('ytdlp_version', safeTag(context.ytdlpVersion));
+    if (context.ytdlpChannel) scope.setTag('ytdlp_channel', safeTag(context.ytdlpChannel));
+    if (context.reasonCode) scope.setTag('reason_code', safeTag(context.reasonCode));
+    if (context.httpStatus) scope.setTag('http_status', safeTag(context.httpStatus));
+    if (context.architecture) scope.setTag('architecture', safeTag(context.architecture));
 
     const fingerprint = fingerprintFor(classification, context);
     if (fingerprint) scope.setFingerprint(fingerprint);

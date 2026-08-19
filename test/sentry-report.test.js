@@ -13,6 +13,9 @@ const {
 test('classifies expected user and platform failures without reporting noise', () => {
   assert.equal(classifyError(new Error('This video is private.')), 'expected');
   assert.equal(classifyError('Network error. Check your connection.'), 'expected');
+  assert.equal(classifyError('HTTP Error 429: Too Many Requests'), 'expected');
+  assert.equal(classifyError('HTTP Error 403: Forbidden'), 'platform');
+  assert.equal(classifyError('The platform rejected this video stream.'), 'platform');
   assert.equal(classifyError('nsig extraction failed because yt-dlp is outdated'), 'platform');
   assert.equal(classifyError(new TypeError('Cannot read properties of undefined')), 'bug');
 });
@@ -84,6 +87,9 @@ test('reports only actionable errors with safe tags and context', () => {
   const eventId = reportError(new TypeError('Unexpected parser failure'), {
     phase: 'parse-info',
     platform: 'youtube',
+    reasonCode: 'access_forbidden',
+    httpStatus: 403,
+    architecture: 'arm64',
     details: { url: 'https://example.com/private', filePath: '/Users/grant/file' },
   });
 
@@ -91,6 +97,9 @@ test('reports only actionable errors with safe tags and context', () => {
   assert.equal(captured.length, 1);
   assert.equal(scopeState.tags.error_class, 'bug');
   assert.equal(scopeState.tags.phase, 'parse-info');
+  assert.equal(scopeState.tags.reason_code, 'access_forbidden');
+  assert.equal(scopeState.tags.http_status, '403');
+  assert.equal(scopeState.tags.architecture, 'arm64');
   assert.equal(scopeState.contexts.failure.url, '[Filtered]');
   assert.equal(scopeState.contexts.failure.filePath, '[Filtered]');
 });

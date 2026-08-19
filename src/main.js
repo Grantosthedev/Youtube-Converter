@@ -191,6 +191,7 @@ const store = new Store({
     projectSubfolders: {},
     activeProject: null,
     lastYtdlpCheck: 0,
+    ytdlpEngineState: {},
     lastCacheCleared: 0,
   },
 });
@@ -603,6 +604,7 @@ ipcMain.handle('start-download', async (event, options) => {
 });
 
 ipcMain.handle('fetch-media-info', async (_event, url) => {
+  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
   return await fetchMediaInfo(url);
 });
 
@@ -1107,6 +1109,7 @@ app.on('ready', () => {
   })().then((result) => {
     if (!result) return;
     if (result.version) Sentry.setTag('ytdlp_version', String(result.version));
+    if (result.channel) Sentry.setTag('ytdlp_channel', String(result.channel));
     if (result.success && !result.skipped) {
       console.log(`[startup] yt-dlp ready: ${result.version}`);
       if (mainWindow && !mainWindow.isDestroyed()) {

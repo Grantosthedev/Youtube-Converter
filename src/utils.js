@@ -114,6 +114,13 @@ function getFfmpegPath() {
   return staticPath;
 }
 
+function getDenoPath() {
+  if (app?.isPackaged) {
+    return path.join(process.resourcesPath, 'deno');
+  }
+  return path.join(__dirname, '..', 'bin', 'deno');
+}
+
 function binaryExists(binPath) {
   try {
     fs.accessSync(binPath, fs.constants.X_OK);
@@ -168,6 +175,7 @@ module.exports = {
   getBundledYtdlpPath,
   getUserBinDir,
   getFfmpegPath,
+  getDenoPath,
   getResourcePath,
   binaryExists,
   parseTimeToSeconds,

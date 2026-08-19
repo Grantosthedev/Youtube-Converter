@@ -1,8 +1,16 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
-const { getYtdlpPath, getFfmpegPath, sanitizeFilename, normalizeInstagramURL } = require('./utils');
+const {
+  binaryExists,
+  getDenoPath,
+  getYtdlpPath,
+  getFfmpegPath,
+  sanitizeFilename,
+  normalizeInstagramURL,
+} = require('./utils');
 const { reportError } = require('./sentry-report');
+const { YTDLP_CHANNEL } = require('./ytdlp-release');
 const path = require('path');
 
 // Remove stale PyInstaller temp dirs (_MEI*) that accumulate when yt-dlp is
@@ -27,53 +35,83 @@ function cleanStaleYtdlpTemp() {
   } catch { /* non-fatal */ }
 }
 
-const ERROR_MAP = [
-  { pattern: /Could not create temp|Could not create temporary/i, message: 'Your disk is almost full. Free up some space and try again.' },
-  { pattern: /private video/i, message: 'This video is private. You need access to download it.' },
-  { pattern: /age.?restrict|age.?gate|sign in to confirm your age/i, message: 'This video is age-restricted. It cannot be downloaded without authentication.' },
-  { pattern: /not available in your country/i, message: 'This video is not available in your region.' },
-  { pattern: /login.*page|locked behind/i, message: 'This content requires login. Try updating yt-dlp, or the content may be private.' },
-  { pattern: /Unsupported URL/i, message: 'This URL type isn\'t supported yet. Downroad handles videos and audio -- image-only posts aren\'t supported via this method.' },
-  { pattern: /unable to extract/i, message: 'Couldn\'t extract content. The post may be private, deleted, or require login. Try updating yt-dlp in Settings.' },
-  { pattern: /HTTP Error 429/i, message: 'Rate-limiting detected. Wait a minute and try again.' },
-  { pattern: /HTTP Error 403|Forbidden/i, message: 'Access denied. The platform is rate-limiting requests. Wait a moment and try again.' },
-  { pattern: /urlopen error|timed out|(?:network|connection).*(?:error|refused|reset)/i, message: 'Network error. Check your internet connection and try again.' },
-  { pattern: /video.*(?:unavailable|removed|deleted|not exist)/i, message: 'This video is unavailable or has been removed.' },
-  { pattern: /is not a valid URL|no video/i, message: 'Please enter a valid URL.' },
-  { pattern: /nsig extraction|signature extraction|player.*error|cipher/i, message: 'yt-dlp is outdated and can\'t decrypt this video. Hit Check for updates in Settings to fix it.' },
-  { pattern: /ExtractorError|extractor.*error/i, message: 'yt-dlp can\'t process this URL. Try updating yt-dlp in Settings.' },
-  { pattern: /certificate verify failed|SSL/i, message: 'SSL certificate error. Check your network or try disabling VPN/proxy.' },
-  { pattern: /Incomplete data|incomplete read/i, message: 'Download was interrupted. Check your connection and try again.' },
-  { pattern: /content.*not available|currently unavailable/i, message: 'This content is currently unavailable on the platform.' },
-  { pattern: /unable to download webpage/i, message: 'Couldn\'t reach the platform. Check your internet or try updating yt-dlp in Settings.' },
-  { pattern: /Got error.*Traceback|ModuleNotFoundError|ImportError/i, message: 'yt-dlp binary is corrupted or incompatible. Try updating yt-dlp in Settings.' },
+const ERROR_RULES = [
+  { code: 'disk_full', pattern: /Could not create temp|Could not create temporary/i, message: 'Your disk is almost full. Free up some space and try again.' },
+  { code: 'private_content', pattern: /private video/i, message: 'This video is private. You need access to download it.' },
+  { code: 'age_restricted', pattern: /age.?restrict|age.?gate|sign in to confirm your age/i, message: 'This video is age-restricted. It cannot be downloaded without authentication.' },
+  { code: 'region_blocked', pattern: /not available in your country/i, message: 'This video is not available in your region.' },
+  { code: 'login_required', pattern: /login.*page|locked behind|sign in to confirm you.re not a bot/i, message: 'YouTube requires a verified session for this request. Stop retrying and try again later.' },
+  { code: 'unsupported_url', pattern: /Unsupported URL/i, message: 'This URL type isn\'t supported yet. Downroad handles videos and audio. Image-only posts aren\'t supported via this method.' },
+  { code: 'js_runtime_missing', pattern: /No supported JavaScript runtime|JavaScript runtime.*(?:missing|unavailable|unsupported)/i, message: 'YouTube challenge support is unavailable. Reinstall or update Downroad to restore the bundled runtime.' },
+  { code: 'po_token_required', pattern: /PO Token.*(?:required|not provided|missing)|missing.*PO Token/i, message: 'YouTube rejected this playback session. Update the download engine and try again.' },
+  { code: 'sabr_only', pattern: /SABR.*(?:only|forced)|forcing SABR/i, message: 'YouTube only offered an unsupported stream for this video. Update the download engine and try again.' },
+  { code: 'extractor_regression', pattern: /nsig extraction|signature extraction|player.*error|cipher|unable to extract|ExtractorError|extractor.*error/i, message: 'The download engine can\'t process YouTube\'s current player. Check for updates in Settings.' },
+  { code: 'rate_limited', status: 429, pattern: /HTTP Error 429|429 Too Many Requests|rate.?limit/i, message: 'The platform is rate-limiting requests. Stop downloads, wait a while, then try again.' },
+  { code: 'network_error', pattern: /urlopen error|timed out|(?:network|connection).*(?:error|refused|reset)/i, message: 'Network error. Check your internet connection and try again.' },
+  { code: 'unavailable', pattern: /video.*(?:unavailable|removed|deleted|not exist)|content.*not available|currently unavailable/i, message: 'This video is unavailable or has been removed.' },
+  { code: 'invalid_url', pattern: /is not a valid URL|no video/i, message: 'Please enter a valid URL.' },
+  { code: 'certificate_error', pattern: /certificate verify failed|SSL/i, message: 'SSL certificate error. Check your network or try disabling VPN/proxy.' },
+  { code: 'incomplete_download', pattern: /Incomplete data|incomplete read/i, message: 'Download was interrupted. Check your connection and try again.' },
+  { code: 'platform_unreachable', pattern: /unable to download webpage/i, message: 'Couldn\'t reach the platform. Check your internet or update the download engine.' },
+  { code: 'engine_corrupt', pattern: /Got error.*Traceback|ModuleNotFoundError|ImportError/i, message: 'The download engine is corrupted or incompatible. Update it in Settings.' },
+  { code: 'access_forbidden', status: 403, pattern: /HTTP Error 403|\b403 Forbidden\b/i, message: 'The platform rejected this video stream. Update the download engine, then try again.' },
 ];
 
-function mapError(stderr) {
-  for (const { pattern, message } of ERROR_MAP) {
-    if (pattern.test(stderr)) return message;
+function diagnoseYtdlpError(stderr) {
+  const source = String(stderr || '');
+  for (const rule of ERROR_RULES) {
+    if (rule.pattern.test(source)) {
+      return { code: rule.code, httpStatus: rule.status || null, message: rule.message };
+    }
   }
-  const errorLine = stderr.split('\n').find(l => l.includes('ERROR:'));
-  if (errorLine) return errorLine.replace('ERROR: ', '').trim();
+  const errorLine = source.split('\n').find(l => l.includes('ERROR:'));
+  if (errorLine) {
+    return {
+      code: 'upstream_error',
+      httpStatus: null,
+      message: errorLine.replace('ERROR: ', '').trim(),
+    };
+  }
 
-  if (stderr.trim()) {
-    console.error('[yt-dlp] raw stderr:', stderr.trim().slice(-500));
-    const lastMeaningful = stderr.trim().split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 150);
+  if (source.trim()) {
+    console.error('[yt-dlp] raw stderr:', source.trim().slice(-500));
+    const lastMeaningful = source.trim().split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 150);
     if (lastMeaningful) {
-      return `yt-dlp error: ${lastMeaningful}. Try updating yt-dlp in Settings.`;
+      return {
+        code: 'unknown_engine_error',
+        httpStatus: null,
+        message: `Download engine error: ${lastMeaningful}. Try updating it in Settings.`,
+      };
     }
   }
 
-  return 'An unexpected error occurred. Try updating yt-dlp in Settings, or check your connection.';
+  return {
+    code: 'unknown_engine_error',
+    httpStatus: null,
+    message: 'An unexpected download engine error occurred. Try updating it in Settings.',
+  };
 }
 
-function reportYtdlpFailure(error, { phase, platform, quality, stderr } = {}) {
+function mapError(stderr) {
+  return diagnoseYtdlpError(stderr).message;
+}
+
+function reportYtdlpFailure(error, { phase, platform, quality, stderr, diagnosis } = {}) {
   reportError(error, {
     phase,
     platform,
     quality,
+    reasonCode: diagnosis?.code,
+    httpStatus: diagnosis?.httpStatus,
+    architecture: process.arch,
+    ytdlpChannel: YTDLP_CHANNEL,
     details: stderr ? { stderr: String(stderr).slice(-2000) } : undefined,
   });
+}
+
+function youtubeRuntimeArgs(platform, denoPath = getDenoPath()) {
+  if (platform !== 'youtube') return [];
+  return binaryExists(denoPath) ? ['--js-runtimes', `deno:${denoPath}`] : [];
 }
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'mkv', 'm4v']);
@@ -105,19 +143,23 @@ function detectMediaType(info, platform, url) {
   return candidateFormats.some(formatHasVideo) ? 'video' : 'image';
 }
 
+function buildInfoArgs({ url, platform, ffmpegPath, denoPath = getDenoPath() }) {
+  return [
+    '--dump-json',
+    '--no-playlist',
+    '--ffmpeg-location', path.dirname(ffmpegPath),
+    ...youtubeRuntimeArgs(platform, denoPath),
+    platform === 'instagram' ? normalizeInstagramURL(url) : url,
+  ];
+}
+
 function fetchVideoInfo(url, platform) {
   return new Promise((resolve, reject) => {
     const ytdlp = getYtdlpPath();
     const ffmpeg = getFfmpegPath();
     const fetchUrl = platform === 'instagram' ? normalizeInstagramURL(url) : url;
 
-    const args = [
-      '--dump-json',
-      '--no-warnings',
-      '--no-playlist',
-      '--ffmpeg-location', path.dirname(ffmpeg),
-      fetchUrl,
-    ];
+    const args = buildInfoArgs({ url: fetchUrl, platform, ffmpegPath: ffmpeg });
 
     cleanStaleYtdlpTemp();
     const timeout = platform === 'instagram' ? 60000 : platform === 'tiktok' ? 45000 : 30000;
@@ -142,11 +184,13 @@ function fetchVideoInfo(url, platform) {
         return;
       }
       if (code !== 0) {
-        const error = new Error(mapError(stderr));
-        reportYtdlpFailure(error, { phase: 'fetch-info', platform, stderr });
+        const diagnosis = diagnoseYtdlpError(stderr);
+        const error = new Error(diagnosis.message);
+        reportYtdlpFailure(error, { phase: 'fetch-info', platform, stderr, diagnosis });
         reject(error);
         return;
       }
+      if (stderr.trim()) console.warn('[yt-dlp] fetch warnings:', stderr.trim().slice(-2000));
       try {
         const info = JSON.parse(stdout);
         const formats = info.formats || [];
@@ -220,13 +264,22 @@ function extractAvailableQualities(formats) {
   return result;
 }
 
-function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title, ffmpegDir, platform }) {
+function buildDownloadArgs({
+  url,
+  quality,
+  startTime,
+  endTime,
+  outputPath,
+  title,
+  ffmpegDir,
+  platform,
+  denoPath = getDenoPath(),
+}) {
   // When no title is provided (instant download), let yt-dlp resolve the filename from metadata
   const safeName = title ? sanitizeFilename(title) : '';
   const outputTemplate = safeName ? `${safeName}.%(ext)s` : '%(title)s.%(ext)s';
   const isYouTube = !platform || platform === 'youtube';
   const args = [
-    '--no-warnings',
     '--no-playlist',
     '--newline',
     '--ffmpeg-location', ffmpegDir,
@@ -234,6 +287,7 @@ function buildDownloadArgs({ url, quality, startTime, endTime, outputPath, title
     '--retries', '5',
     '--fragment-retries', '5',
     '--buffer-size', '64K',
+    ...youtubeRuntimeArgs(isYouTube ? 'youtube' : platform, denoPath),
   ];
 
   if (quality === 'audio') {
@@ -587,12 +641,14 @@ function startDownload(options, onProgress, onComplete, onError) {
         onComplete(filePath);
       }
     } else {
-      const error = new Error(mapError(stderrBuf));
+      const diagnosis = diagnoseYtdlpError(stderrBuf);
+      const error = new Error(diagnosis.message);
       reportYtdlpFailure(error, {
         phase: 'download',
         platform: options.platform,
         quality: options.quality,
         stderr: stderrBuf,
+        diagnosis,
       });
       onError(error.message);
     }
@@ -620,7 +676,6 @@ function fetchCarouselVideos(url) {
 
     const args = [
       '--dump-json',
-      '--no-warnings',
       '--ffmpeg-location', path.dirname(ffmpeg),
       fetchUrl,
     ];
@@ -635,8 +690,9 @@ function fetchCarouselVideos(url) {
 
     proc.on('close', (code) => {
       if (code !== 0) {
-        const error = new Error(mapError(stderr));
-        reportYtdlpFailure(error, { phase: 'fetch-carousel', platform: 'instagram', stderr });
+        const diagnosis = diagnoseYtdlpError(stderr);
+        const error = new Error(diagnosis.message);
+        reportYtdlpFailure(error, { phase: 'fetch-carousel', platform: 'instagram', stderr, diagnosis });
         resolve([]);
         return;
       }
@@ -684,7 +740,6 @@ function fetchInstagramMediaViaYtdlp(url) {
 
     const args = [
       '--dump-json',
-      '--no-warnings',
       '--ffmpeg-location', path.dirname(ffmpeg),
       fetchUrl,
     ];
@@ -708,8 +763,14 @@ function fetchInstagramMediaViaYtdlp(url) {
       clearTimeout(timer);
       if (killed || code !== 0) {
         if (code !== 0) {
-          const error = new Error(mapError(stderr));
-          reportYtdlpFailure(error, { phase: 'fetch-instagram-fallback', platform: 'instagram', stderr });
+          const diagnosis = diagnoseYtdlpError(stderr);
+          const error = new Error(diagnosis.message);
+          reportYtdlpFailure(error, {
+            phase: 'fetch-instagram-fallback',
+            platform: 'instagram',
+            stderr,
+            diagnosis,
+          });
         }
         resolve(null);
         return;
@@ -774,4 +835,15 @@ function fetchInstagramMediaViaYtdlp(url) {
   });
 }
 
-module.exports = { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp };
+module.exports = {
+  buildDownloadArgs,
+  buildInfoArgs,
+  cleanStaleYtdlpTemp,
+  diagnoseYtdlpError,
+  fetchCarouselVideos,
+  fetchInstagramMediaViaYtdlp,
+  fetchVideoInfo,
+  mapError,
+  startDownload,
+  youtubeRuntimeArgs,
+};
