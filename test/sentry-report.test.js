@@ -106,7 +106,8 @@ test('reports only actionable errors with safe tags and context', () => {
 
   assert.equal(eventId, 'event-id');
   assert.equal(captured.length, 1);
-  assert.equal(scopeState.tags.error_class, 'bug');
+  assert.equal(scopeState.tags.error_class, 'platform');
+  assert.equal(scopeState.level, 'warning');
   assert.equal(scopeState.tags.phase, 'parse-info');
   assert.equal(scopeState.tags.reason_code, 'access_forbidden');
   assert.equal(scopeState.tags.http_status, '403');
