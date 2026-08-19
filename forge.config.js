@@ -27,6 +27,7 @@ module.exports = {
       /^\/\.env$/,
       /^\/\.gitignore$/,
       /^\/README\.md$/i,
+      /^\/RELEASE_NOTES\.md$/i,
       /^\/forge\.config\.js$/,
       /\.d\.ts$/,
       /\.js\.map$/,

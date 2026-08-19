@@ -42,3 +42,10 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run publish
+
+      - name: Make release live
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_TAG="v$(node -p "require('./package.json').version")"
+          gh release edit "$RELEASE_TAG" --draft=false

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Post-publish script: reads RELEASE_NOTES.md and pushes it to the
- * matching draft GitHub release for the current package version.
+ * matching GitHub release for the current package version.
  *
  * Runs automatically via the `postpublish` npm script after `npm run publish`.
  * Requires GITHUB_TOKEN in .env (same token used by the publisher).
@@ -64,7 +64,7 @@ function ghRequest(method, path, body) {
 }
 
 async function run() {
-  // Find the draft release matching this version tag
+  // Find the release matching this version tag
   const list = await ghRequest('GET', `/repos/${OWNER}/${REPO}/releases?per_page=10`);
   if (list.status !== 200) {
     console.error(`[release-notes] Failed to list releases: HTTP ${list.status}`);

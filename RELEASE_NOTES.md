@@ -1,8 +1,9 @@
-Improves the Settings update experience with one clear Check for updates button for both Downroad and the yt-dlp engine.
+# Downroad 1.5.3
 
-- Adds visible spinner and button text feedback throughout checking, downloading, and engine updates.
-- Fixes false timeout errors while the engine is still updating.
-- Makes manual app update checks reliable when a background check is already running.
-- Reports connection and install failures instead of incorrectly claiming everything is current.
-- Preserves ready-to-install updates across later background checks.
-- Adds Sentry crash reporting across the main, preload, and renderer processes.
+Fixes widespread YouTube 403 download failures caused by retired player clients in stale download-engine builds.
+
+- Moves yt-dlp to a verified nightly build containing the upstream YouTube fix.
+- Bundles Deno so modern YouTube JavaScript challenges work without extra setup.
+- Adds checksum verification, atomic engine installation, and automatic rollback.
+- Correctly distinguishes 403 access failures from real 429 rate limiting.
+- Improves privacy-safe diagnostics for future platform changes.
