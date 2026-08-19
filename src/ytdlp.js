@@ -97,6 +97,7 @@ function mapError(stderr) {
 }
 
 function reportYtdlpFailure(error, { phase, platform, quality, stderr, diagnosis } = {}) {
+  if (stderr) console.error('[yt-dlp] failure tail:', String(stderr).trim().slice(-2000));
   reportError(error, {
     phase,
     platform,
@@ -105,7 +106,10 @@ function reportYtdlpFailure(error, { phase, platform, quality, stderr, diagnosis
     httpStatus: diagnosis?.httpStatus,
     architecture: process.arch,
     ytdlpChannel: YTDLP_CHANNEL,
-    details: stderr ? { stderr: String(stderr).slice(-2000) } : undefined,
+    details: diagnosis ? {
+      reasonCode: diagnosis.code,
+      httpStatus: diagnosis.httpStatus,
+    } : undefined,
   });
 }
 

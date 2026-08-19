@@ -15,7 +15,21 @@ const YTDLP_PATH = path.join(BIN_DIR, 'yt-dlp_macos');
 const YTDLP_GZ_PATH = path.join(BIN_DIR, 'yt-dlp_macos.gz');
 const DENO_PATH = path.join(BIN_DIR, 'deno');
 const RUNTIME_MANIFEST_PATH = path.join(BIN_DIR, 'runtime-manifest.json');
-const DENO_RELEASE_API = 'https://api.github.com/repos/denoland/deno/releases/latest';
+const DENO_VERSION = '2.9.5';
+const DENO_ASSETS = {
+  arm64: {
+    name: 'deno-aarch64-apple-darwin.zip',
+    archiveSha256: 'b796aadd131f6930560c1ee040cf0d6f53933fbb987464e9ff46bd7ea4830615',
+    binarySha256: 'b5bd08edab254d42d7b05aa5b6cb4c9b8d4dede4975aff76951ce2cce18866fa',
+    fileArchitecture: 'arm64',
+  },
+  x64: {
+    name: 'deno-x86_64-apple-darwin.zip',
+    archiveSha256: 'c1b8b89a81e91b2a8b3f96def3195d08cfe3a105651da7908d53061f7140510d',
+    binarySha256: 'befc4fee79127584c0f5c9f76ca6bb73c8e6ff523c01acd52e9c5db1968a09cb',
+    fileArchitecture: 'x86_64',
+  },
+};
 const TARGET_ARCH = process.env.DOWNROAD_TARGET_ARCH || process.arch;
 
 function getBuffer(url, redirects = 0) {
@@ -58,14 +72,16 @@ async function downloadVerified(url, expectedSha256, destPath) {
   fs.renameSync(tempPath, destPath);
 }
 
-function prepBinary(binPath) {
+function prepBinary(binPath, { requireCodeSign = false } = {}) {
   fs.chmodSync(binPath, 0o755);
   try {
     execFileSync('/usr/bin/xattr', ['-c', binPath], { timeout: 3000 });
   } catch {}
   try {
     execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', binPath], { timeout: 5000 });
-  } catch {}
+  } catch (error) {
+    if (requireCodeSign) throw error;
+  }
 }
 
 function createGzBundle(srcPath, destPath) {
@@ -75,34 +91,38 @@ function createGzBundle(srcPath, destPath) {
   console.log(`Created ${path.basename(destPath)} (${(compressed.length / 1024 / 1024).toFixed(1)} MB compressed from ${(raw.length / 1024 / 1024).toFixed(1)} MB)`);
 }
 
-function denoAssetName() {
-  if (TARGET_ARCH === 'arm64') return 'deno-aarch64-apple-darwin.zip';
-  if (TARGET_ARCH === 'x64') return 'deno-x86_64-apple-darwin.zip';
-  throw new Error(`Unsupported macOS architecture for Deno: ${TARGET_ARCH}`);
-}
-
 async function installDeno() {
-  const release = await getJson(DENO_RELEASE_API);
-  const assetName = denoAssetName();
-  const asset = release.assets?.find(item => item.name === assetName);
-  const digest = String(asset?.digest || '');
-  if (!asset?.browser_download_url || !/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-    throw new Error(`Deno release is missing a verified ${assetName}`);
-  }
+  const asset = DENO_ASSETS[TARGET_ARCH];
+  if (!asset) throw new Error(`Unsupported macOS architecture for Deno: ${TARGET_ARCH}`);
 
-  const zipPath = path.join(BIN_DIR, assetName);
-  console.log(`Downloading Deno ${release.tag_name} for macOS ${TARGET_ARCH}...`);
-  await downloadVerified(asset.browser_download_url, digest.slice(7), zipPath);
+  const zipPath = path.join(BIN_DIR, asset.name);
+  const downloadUrl = `https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/${asset.name}`;
+  console.log(`Downloading pinned Deno v${DENO_VERSION} for macOS ${TARGET_ARCH}...`);
+  await downloadVerified(downloadUrl, asset.archiveSha256, zipPath);
   try {
     execFileSync('/usr/bin/unzip', ['-jo', zipPath, 'deno', '-d', BIN_DIR], { stdio: 'inherit' });
   } finally {
     try { fs.unlinkSync(zipPath); } catch {}
   }
-  prepBinary(DENO_PATH);
+  const binarySha256 = crypto.createHash('sha256').update(fs.readFileSync(DENO_PATH)).digest('hex');
+  if (binarySha256 !== asset.binarySha256) throw new Error('Extracted Deno checksum verification failed');
+
+  const fileOutput = execFileSync('/usr/bin/file', [DENO_PATH], { encoding: 'utf8' });
+  if (!fileOutput.includes('Mach-O') || !fileOutput.includes(asset.fileArchitecture)) {
+    throw new Error(`Deno architecture validation failed for ${TARGET_ARCH}`);
+  }
+  prepBinary(DENO_PATH, { requireCodeSign: process.platform === 'darwin' });
+  if (process.platform === 'darwin') {
+    const versionOutput = execFileSync(DENO_PATH, ['--version'], { encoding: 'utf8', timeout: 10000 });
+    if (!versionOutput.startsWith(`deno ${DENO_VERSION}`)) {
+      throw new Error(`Deno runtime validation returned an unexpected version: ${versionOutput.trim()}`);
+    }
+  }
   return {
-    version: String(release.tag_name || '').replace(/^v/, ''),
-    asset: assetName,
-    sha256: digest.slice(7),
+    version: DENO_VERSION,
+    asset: asset.name,
+    archiveSha256: asset.archiveSha256,
+    sha256: asset.binarySha256,
   };
 }
 

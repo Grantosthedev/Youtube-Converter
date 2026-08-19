@@ -21,6 +21,31 @@ const PLATFORM_ERROR_PATTERNS = [
   /youtube challenge support|playback session|unsupported stream/i,
 ];
 
+const EXPECTED_REASON_CODES = new Set([
+  'age_restricted',
+  'certificate_error',
+  'disk_full',
+  'incomplete_download',
+  'invalid_url',
+  'login_required',
+  'network_error',
+  'private_content',
+  'rate_limited',
+  'region_blocked',
+  'unavailable',
+  'unsupported_url',
+]);
+
+const PLATFORM_REASON_CODES = new Set([
+  'access_forbidden',
+  'engine_corrupt',
+  'extractor_regression',
+  'js_runtime_missing',
+  'platform_unreachable',
+  'po_token_required',
+  'sabr_only',
+]);
+
 const SENSITIVE_KEY = /(?:^|_)(?:url|uri|path|filepath|clipboard|history|project|username|email)(?:$|_)/i;
 const URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]+/gi;
 const FILE_URL_PATTERN = /\bfile:\/\/\/[^\s"'<>]+/gi;
@@ -45,6 +70,12 @@ function classifyError(error) {
   if (EXPECTED_ERROR_PATTERNS.some(pattern => pattern.test(message))) return 'expected';
   if (PLATFORM_ERROR_PATTERNS.some(pattern => pattern.test(message))) return 'platform';
   return 'bug';
+}
+
+function classifyReasonCode(reasonCode, error) {
+  if (EXPECTED_REASON_CODES.has(reasonCode)) return 'expected';
+  if (PLATFORM_REASON_CODES.has(reasonCode)) return 'platform';
+  return classifyError(error);
 }
 
 function scrubString(value) {
@@ -112,7 +143,9 @@ function fingerprintFor(classification, context = {}) {
 }
 
 function reportError(error, context = {}) {
-  const classification = classifyError(error);
+  const classification = context.reasonCode
+    ? classifyReasonCode(context.reasonCode, error)
+    : classifyError(error);
   if (!sentry || classification === 'expected') return null;
 
   const exception = error instanceof Error ? error : new Error(errorMessage(error));
@@ -150,6 +183,7 @@ function addBreadcrumb(message, context = {}) {
 module.exports = {
   addBreadcrumb,
   classifyError,
+  classifyReasonCode,
   configureSentryReporting,
   errorMessage,
   fingerprintFor,

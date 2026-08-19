@@ -13,7 +13,8 @@
     "build:sentry": "node scripts/build-sentry-renderer.js",
     "test": "node --test",
     "check": "node scripts/check-js.js",
-    "verify": "npm run build:sentry && npm run check && npm test",
+    "check:runtime": "node scripts/check-runtime-assets.js",
+    "verify": "npm run build:sentry && npm run check && npm run check:runtime && npm test",
     "postinstall": "node scripts/download-ytdlp.js && node scripts/build-sentry-renderer.js"
   },
   "author": "Grantosthedev",

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  MINIMUM_FIXED_YTDLP_SHA256,
   MINIMUM_FIXED_YTDLP_VERSION,
   compareYtdlpVersions,
   isSupportedYtdlpVersion,
@@ -22,7 +23,7 @@ test('rejects engines older than the confirmed YouTube fix', () => {
 
 test('selects an exact release asset with a GitHub SHA-256 digest', () => {
   const selected = releaseAsset({
-    tag_name: '2026.08.18.122307',
+    tag_name: '2026.08.19.000001',
     assets: [{
       name: 'yt-dlp_macos',
       browser_download_url: 'https://example.com/yt-dlp_macos',
@@ -31,9 +32,30 @@ test('selects an exact release asset with a GitHub SHA-256 digest', () => {
     }],
   });
 
-  assert.equal(selected.version, '2026.08.18.122307');
+  assert.equal(selected.version, '2026.08.19.000001');
   assert.equal(selected.sha256, 'a'.repeat(64));
   assert.equal(selected.size, 123);
+});
+
+test('pins the reviewed emergency build digest in source', () => {
+  const selected = releaseAsset({
+    tag_name: MINIMUM_FIXED_YTDLP_VERSION,
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+      digest: `sha256:${MINIMUM_FIXED_YTDLP_SHA256}`,
+    }],
+  });
+  assert.equal(selected.sha256, MINIMUM_FIXED_YTDLP_SHA256);
+
+  assert.throws(() => releaseAsset({
+    tag_name: MINIMUM_FIXED_YTDLP_VERSION,
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+      digest: `sha256:${'b'.repeat(64)}`,
+    }],
+  }), /reviewed build/);
 });
 
 test('refuses release assets without a trustworthy digest', () => {

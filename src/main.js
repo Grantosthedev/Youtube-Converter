@@ -249,6 +249,14 @@ const videoInfoCache = new Map();
 let mainWindow = null;
 const activeDownloads = new Map();
 let ytdlpUpdatePromise = null;
+let ytdlpReadyError = null;
+
+async function awaitYtdlpReady() {
+  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  if (ytdlpReadyError) {
+    throw new Error(`Download engine unavailable: ${ytdlpReadyError}`);
+  }
+}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -341,9 +349,7 @@ function createWindow() {
 // --- IPC Handlers ---
 
 ipcMain.handle('fetch-video-info', async (_event, url) => {
-  if (ytdlpUpdatePromise) {
-    await ytdlpUpdatePromise;
-  }
+  await awaitYtdlpReady();
   if (!isValidURL(url)) {
     throw new Error('That\'s not a valid URL. Paste a YouTube, Instagram, or TikTok link.');
   }
@@ -375,9 +381,7 @@ const VALID_QUALITY_HEIGHT = /^\d{3,4}$/;
 const TIME_FORMAT = /^\d{2}:\d{2}:\d{2}$/;
 
 ipcMain.handle('start-download', async (event, options) => {
-  if (ytdlpUpdatePromise) {
-    await ytdlpUpdatePromise;
-  }
+  await awaitYtdlpReady();
   if (!options || typeof options !== 'object') {
     throw new Error('Invalid download options, you inept noodle.');
   }
@@ -604,12 +608,12 @@ ipcMain.handle('start-download', async (event, options) => {
 });
 
 ipcMain.handle('fetch-media-info', async (_event, url) => {
-  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  await awaitYtdlpReady();
   return await fetchMediaInfo(url);
 });
 
 ipcMain.handle('fetch-carousel-videos', async (_event, url) => {
-  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  await awaitYtdlpReady();
   return await fetchCarouselVideos(url);
 });
 
@@ -833,11 +837,19 @@ ipcMain.handle('set-setting', async (_event, key, value) => {
 });
 
 ipcMain.handle('update-ytdlp', async () => {
-  return await updateYtdlp();
+  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  const result = await updateYtdlp();
+  if (result.success) ytdlpReadyError = null;
+  else ytdlpReadyError = result.error || 'Update failed';
+  return result;
 });
 
 ipcMain.handle('check-ytdlp-update', async () => {
-  return await checkYtdlpUpdate();
+  if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
+  const result = await checkYtdlpUpdate();
+  if (result.success) ytdlpReadyError = null;
+  else ytdlpReadyError = result.error || 'Update check failed';
+  return result;
 });
 
 ipcMain.handle('get-ytdlp-version', async () => {
@@ -1107,7 +1119,18 @@ app.on('ready', () => {
     }
     return ensureYtdlpFresh(store);
   })().then((result) => {
-    if (!result) return;
+    if (!result) {
+      ytdlpReadyError = 'Initial setup failed';
+      return;
+    }
+    if (!result.success) {
+      ytdlpReadyError = result.error || 'Required engine update failed';
+      console.error('[startup] yt-dlp is not ready:', ytdlpReadyError);
+      pendingActivityResult = { type: 'ytdlp-check', status: 'failed' };
+      if (activityNotified) sendActivity(pendingActivityResult);
+      return;
+    }
+    ytdlpReadyError = null;
     if (result.version) Sentry.setTag('ytdlp_version', String(result.version));
     if (result.channel) Sentry.setTag('ytdlp_channel', String(result.channel));
     if (result.success && !result.skipped) {
@@ -1120,7 +1143,8 @@ app.on('ready', () => {
       pendingActivityResult = { type: 'ytdlp-check', status: 'up-to-date' };
     }
     if (activityNotified) sendActivity(pendingActivityResult);
-  }).catch(() => {
+  }).catch((error) => {
+    ytdlpReadyError = error?.message || 'Engine setup failed';
     pendingActivityResult = { type: 'ytdlp-check', status: 'failed' };
     if (activityNotified) sendActivity(pendingActivityResult);
   }).finally(() => {

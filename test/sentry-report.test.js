@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   classifyError,
+  classifyReasonCode,
   configureSentryReporting,
   fingerprintFor,
   reportError,
@@ -18,6 +19,12 @@ test('classifies expected user and platform failures without reporting noise', (
   assert.equal(classifyError('The platform rejected this video stream.'), 'platform');
   assert.equal(classifyError('nsig extraction failed because yt-dlp is outdated'), 'platform');
   assert.equal(classifyError(new TypeError('Cannot read properties of undefined')), 'bug');
+});
+
+test('classifies structured engine reasons without relying on user copy', () => {
+  assert.equal(classifyReasonCode('login_required', new Error('Verified session required')), 'expected');
+  assert.equal(classifyReasonCode('access_forbidden', new Error('Rejected')), 'platform');
+  assert.equal(classifyReasonCode('unknown_engine_error', new Error('Odd failure')), 'bug');
 });
 
 test('groups platform regressions by platform and phase', () => {
@@ -82,6 +89,10 @@ test('reports only actionable errors with safe tags and context', () => {
 
   configureSentryReporting(fakeSentry);
   assert.equal(reportError(new Error('This video is private.'), { phase: 'fetch-info' }), null);
+  assert.equal(reportError(new Error('Verified session required'), {
+    phase: 'fetch-info',
+    reasonCode: 'login_required',
+  }), null);
   assert.equal(captured.length, 0);
 
   const eventId = reportError(new TypeError('Unexpected parser failure'), {
