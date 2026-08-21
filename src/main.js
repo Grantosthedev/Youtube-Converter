@@ -26,6 +26,11 @@ const { nextEngineReadinessError } = require('./ytdlp-readiness');
 const { validateDenoRuntime } = require('./runtime-readiness');
 const { isValidURL, detectPlatform, normalizeYouTubeURL, normalizeInstagramURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = require('./media-fetcher');
+const {
+  clearYoutubeSession,
+  hasYoutubeSession,
+  importYoutubeCookies,
+} = require('./youtube-session');
 
 setYtdlpFetcher(fetchInstagramMediaViaYtdlp);
 
@@ -255,6 +260,16 @@ let ytdlpReadyError = null;
 let denoReadinessPromise = null;
 let denoReadyError = null;
 
+function getYoutubeCookiePath() {
+  return path.join(app.getPath('userData'), 'youtube-cookies.txt');
+}
+
+function youtubeSessionOptions(platform) {
+  if (platform !== 'youtube') return {};
+  const cookieFile = getYoutubeCookiePath();
+  return hasYoutubeSession(cookieFile) ? { cookieFile } : {};
+}
+
 async function awaitYtdlpReady(url) {
   if (ytdlpUpdatePromise) await ytdlpUpdatePromise;
   if (ytdlpReadyError) {
@@ -373,7 +388,7 @@ ipcMain.handle('fetch-video-info', async (_event, url) => {
   const cacheKey = normalizedUrl;
   const fetchUrl = normalizedUrl;
 
-  const info = await fetchVideoInfo(fetchUrl, platform);
+  const info = await fetchVideoInfo(fetchUrl, platform, youtubeSessionOptions(platform));
 
   if (platform === 'youtube' && info.isLive) {
     throw new Error('Live streams can\'t be clipped, bitch. Wait for the stream to end like everyone else.');
@@ -453,6 +468,7 @@ ipcMain.handle('start-download', async (event, options) => {
     outputPath: downloadPath,
     title: options.title || null,
     platform,
+    ...youtubeSessionOptions(platform),
   };
 
   const proc = startDownload(
@@ -521,7 +537,11 @@ ipcMain.handle('start-download', async (event, options) => {
         // For instant/cache-miss downloads, do a background info fetch so the
         // history entry gets filled in with title, thumbnail, duration, etc.
         if (Object.keys(cachedInfo).length === 0) {
-          fetchVideoInfo(downloadOptions.url, platform).then(info => {
+          fetchVideoInfo(
+            downloadOptions.url,
+            platform,
+            youtubeSessionOptions(platform),
+          ).then(info => {
             if (!info) return;
             const hist = store.get('downloadHistory');
             const idx = hist.findIndex(e => e.id === historyEntry.id);
@@ -803,6 +823,34 @@ ipcMain.handle('select-folder', async () => {
   return null;
 });
 
+ipcMain.handle('select-youtube-session', async () => {
+  const dialogOpts = {
+    properties: ['openFile'],
+    title: 'Choose exported YouTube cookies',
+    filters: [{ name: 'Netscape cookies', extensions: ['txt'] }],
+  };
+  const result = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showOpenDialog(mainWindow, dialogOpts)
+    : await dialog.showOpenDialog(dialogOpts);
+  if (result.canceled || result.filePaths.length === 0) {
+    return { connected: hasYoutubeSession(getYoutubeCookiePath()), canceled: true };
+  }
+
+  try {
+    importYoutubeCookies(result.filePaths[0], getYoutubeCookiePath());
+    videoInfoCache.clear();
+    return { connected: true };
+  } catch (error) {
+    return { connected: false, error: error.message };
+  }
+});
+
+ipcMain.handle('clear-youtube-session', async () => {
+  clearYoutubeSession(getYoutubeCookiePath());
+  videoInfoCache.clear();
+  return { connected: false };
+});
+
 ipcMain.handle('reveal-in-finder', async (_event, filePath) => {
   if (filePath) {
     const resolved = path.resolve(filePath);
@@ -833,6 +881,7 @@ ipcMain.handle('get-settings', async () => {
     projects: store.get('projects'),
     projectHues: ensureProjectHues(),
     projectSubfolders: store.get('projectSubfolders'),
+    youtubeSessionConnected: hasYoutubeSession(getYoutubeCookiePath()),
   };
 });
 

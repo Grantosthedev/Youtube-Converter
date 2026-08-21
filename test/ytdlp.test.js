@@ -7,6 +7,7 @@ const path = require('node:path');
 const {
   buildDownloadArgs,
   buildInfoArgs,
+  contextualizeDiagnosis,
   diagnoseYtdlpError,
   youtubeRuntimeArgs,
 } = require('../src/ytdlp');
@@ -83,4 +84,37 @@ test('keeps YouTube client selection under yt-dlp control', (t) => {
   assert.equal(args.includes('--no-warnings'), false);
   assert.equal(args.some(arg => /player[_-]client/.test(arg)), false);
   assert.equal(args.some(arg => /android_vr|web_embedded/.test(arg)), false);
+});
+
+test('adds an explicitly imported session only to YouTube operations', (t) => {
+  const deno = executable(t);
+  const cookieFile = path.join(path.dirname(deno), 'youtube-cookies.txt');
+  fs.writeFileSync(cookieFile, '.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n');
+
+  const youtubeArgs = buildInfoArgs({
+    url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    platform: 'youtube',
+    ffmpegPath: '/tmp/ffmpeg',
+    denoPath: deno,
+    cookieFile,
+  });
+  const instagramArgs = buildInfoArgs({
+    url: 'https://www.instagram.com/reel/example/',
+    platform: 'instagram',
+    ffmpegPath: '/tmp/ffmpeg',
+    denoPath: deno,
+    cookieFile,
+  });
+
+  assert.deepEqual(youtubeArgs.slice(youtubeArgs.indexOf('--cookies'), -1), ['--cookies', cookieFile]);
+  assert.equal(instagramArgs.includes('--cookies'), false);
+});
+
+test('distinguishes a missing session from an expired imported session', () => {
+  const diagnosis = diagnoseYtdlpError('Sign in to confirm you’re not a bot');
+  assert.match(contextualizeDiagnosis(diagnosis, { platform: 'youtube' }).message, /Connect a YouTube session/);
+  assert.match(
+    contextualizeDiagnosis(diagnosis, { platform: 'youtube', cookieFile: '/tmp/cookies.txt' }).message,
+    /rejected or expired/,
+  );
 });

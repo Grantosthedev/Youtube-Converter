@@ -65,6 +65,8 @@ See [RELEASING.md](RELEASING.md) for the full step-by-step guide, prerequisites,
 
 If downloads start failing, YouTube may have changed its API. Open Settings and hit **Check for updates** to refresh the yt-dlp engine.
 
+If YouTube reports that it needs a verified session, export fresh `youtube.com` cookies in Netscape format, then open Settings and choose **YouTube Session > Connect**. Downroad filters out every non-YouTube cookie and stores the result with user-only file permissions. See the [yt-dlp YouTube cookie guidance](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies) for the recommended private-window export flow.
+
 ## Instagram Remote Config
 
 Instagram rotates their API tokens every 2-4 weeks. To fix Instagram downloads without a new app release, edit `config/instagram-config.json` in this repo and push to `main`. All installed apps fetch the updated config within 24 hours.

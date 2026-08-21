@@ -37,15 +37,29 @@ test('selects an exact release asset with a GitHub SHA-256 digest', () => {
   assert.equal(selected.size, 123);
 });
 
-test('rejects releases not pinned in the signed application source', () => {
-  assert.throws(() => releaseAsset({
+test('accepts newer nightly releases with GitHub-provided digests', () => {
+  const selected = releaseAsset({
     tag_name: '2026.08.19.000001',
     assets: [{
       name: 'yt-dlp_macos',
       browser_download_url: 'https://example.com/yt-dlp_macos',
       digest: `sha256:${'a'.repeat(64)}`,
     }],
-  }), /Unreviewed/);
+  });
+
+  assert.equal(selected.version, '2026.08.19.000001');
+  assert.equal(selected.sha256, 'a'.repeat(64));
+});
+
+test('rejects releases older than the reviewed compatibility baseline', () => {
+  assert.throws(() => releaseAsset({
+    tag_name: '2026.08.17.000001',
+    assets: [{
+      name: 'yt-dlp_macos',
+      browser_download_url: 'https://example.com/yt-dlp_macos',
+      digest: `sha256:${'a'.repeat(64)}`,
+    }],
+  }), /predates/);
 });
 
 test('pins the reviewed emergency build digest in source', () => {

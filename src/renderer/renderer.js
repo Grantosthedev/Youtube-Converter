@@ -16,6 +16,7 @@ const state = {
   autoPaste: true,
   showInFinder: false,
   instantDownload: false,
+  youtubeSessionConnected: false,
   queueOpen: false,
   historyOpen: false,
   historyData: [],
@@ -76,6 +77,8 @@ const settingsBackdrop = $('#settingsBackdrop');
 const autoPasteToggle = $('#autoPasteToggle');
 const showInFinderToggle = $('#showInFinderToggle');
 const instantDownloadToggle = $('#instantDownloadToggle');
+const youtubeSessionBtn = $('#youtubeSessionBtn');
+const youtubeSessionClear = $('#youtubeSessionClear');
 const modeToggle = $('#modeToggle');
 const checkUpdatesBtn = $('#checkUpdatesBtn');
 const checkUpdatesBtnLabel = checkUpdatesBtn.querySelector('span');
@@ -3836,6 +3839,38 @@ if (instantDownloadToggle) {
   });
 }
 
+function updateYoutubeSessionControl() {
+  if (!youtubeSessionBtn || !youtubeSessionClear) return;
+  youtubeSessionBtn.classList.toggle('connected', state.youtubeSessionConnected);
+  youtubeSessionBtn.querySelector('span').textContent = state.youtubeSessionConnected ? 'Connected' : 'Connect';
+  youtubeSessionClear.style.display = state.youtubeSessionConnected ? '' : 'none';
+}
+
+if (youtubeSessionBtn) {
+  youtubeSessionBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const result = await window.api.selectYoutubeSession();
+    if (result.canceled) return;
+    state.youtubeSessionConnected = result.connected === true;
+    updateYoutubeSessionControl();
+    if (result.error) {
+      showStatus('error', result.error);
+      return;
+    }
+    showStatus('success', 'YouTube session connected. Anonymous-request blocks can get bent.');
+  });
+}
+
+if (youtubeSessionClear) {
+  youtubeSessionClear.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await window.api.clearYoutubeSession();
+    state.youtubeSessionConnected = false;
+    updateYoutubeSessionControl();
+    showStatus('info', 'YouTube session disconnected.');
+  });
+}
+
 modeToggle.addEventListener('click', (e) => {
   const btn = e.target.closest('.mode-switcher__btn');
   if (!btn) return;
@@ -5745,6 +5780,7 @@ async function init() {
   state.autoPaste = settings.autoPaste !== false;
   state.showInFinder = settings.showInFinder === true;
   state.instantDownload = settings.instantDownload === true;
+  state.youtubeSessionConnected = settings.youtubeSessionConnected === true;
   state.mode = settings.mode || 'unhinged';
   state.theme = settings.theme || 'auto';
   state.activeProject = settings.activeProject || null;
@@ -5758,6 +5794,7 @@ async function init() {
   autoPasteToggle.classList.toggle('active', state.autoPaste);
   showInFinderToggle.classList.toggle('active', state.showInFinder);
   if (instantDownloadToggle) instantDownloadToggle.classList.toggle('active', state.instantDownload);
+  updateYoutubeSessionControl();
   updateModeSwitcher(false);
   applyTheme(state.theme, false);
   applyMode();
