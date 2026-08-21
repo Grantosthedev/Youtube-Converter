@@ -5856,8 +5856,13 @@ async function init() {
    Unified App Update State
    ============================================================ */
 
+function isBenignAppUpdateError(message) {
+  return /command is disabled|cannot be executed/i.test(message || '');
+}
+
 function applyAppUpdateStatus(data) {
   if (!data) return;
+  if (data.status === 'error' && isBenignAppUpdateError(data.error)) return;
   switch (data.status) {
     case 'checking':
       if (appUpdateCheckUserTriggered) {
