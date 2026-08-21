@@ -2088,6 +2088,15 @@ async function handleUrlChange() {
   }
 }
 
+function userFacingIpcError(error, fallback) {
+  const message = String(error?.message || fallback || '');
+  return message.replace(/^Error invoking remote method '[^']+': Error:\s*/i, '');
+}
+
+function isYoutubeSessionError(message) {
+  return /(?:Connect|Reconnect) a YouTube session|YouTube session was rejected or expired/i.test(message);
+}
+
 async function fetchInfo(url) {
   if (state.isFetchingInfo) return;
   state.isFetchingInfo = true;
@@ -2155,9 +2164,10 @@ async function fetchInfo(url) {
     videoCard.className = 'video-card';
     state.videoInfo = null;
     relocateDownloadBtn('url-row');
-    showStatus('error', err.message || 'Failed to fetch video info.');
+    const message = userFacingIpcError(err, 'Failed to fetch video info.');
+    showStatus('error', message);
     lastFailedUrl = url;
-    statusRetry.style.display = '';
+    statusRetry.style.display = isYoutubeSessionError(message) ? 'none' : '';
     updateDownloadBtnState();
 
     setUrlHint('');
@@ -3858,6 +3868,13 @@ if (youtubeSessionBtn) {
       return;
     }
     showStatus('success', 'YouTube session connected. Anonymous-request blocks can get bent.');
+    if (lastFailedUrl && detectPlatform(lastFailedUrl) === 'youtube') {
+      const retryUrl = lastFailedUrl;
+      lastFailedUrl = '';
+      closeSettings();
+      state.isFetchingInfo = false;
+      fetchInfo(retryUrl);
+    }
   });
 }
 
