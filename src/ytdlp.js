@@ -11,6 +11,7 @@ const {
 } = require('./utils');
 const { reportError } = require('./sentry-report');
 const { YTDLP_CHANNEL } = require('./ytdlp-release');
+const { youtubeCookieArgs } = require('./youtube-session');
 const path = require('path');
 
 // Remove stale PyInstaller temp dirs (_MEI*) that accumulate when yt-dlp is
@@ -40,7 +41,7 @@ const ERROR_RULES = [
   { code: 'private_content', pattern: /private video/i, message: 'This video is private. You need access to download it.' },
   { code: 'age_restricted', pattern: /age.?restrict|age.?gate|sign in to confirm your age/i, message: 'This video is age-restricted. It cannot be downloaded without authentication.' },
   { code: 'region_blocked', pattern: /not available in your country/i, message: 'This video is not available in your region.' },
-  { code: 'login_required', pattern: /login.*page|locked behind|sign in to confirm you.re not a bot/i, message: 'YouTube requires a verified session for this request. Stop retrying and try again later.' },
+  { code: 'login_required', pattern: /login.*page|locked behind|sign in to confirm you.re not a bot/i, message: 'YouTube blocked this anonymous request. Connect a YouTube session in Settings, then try again.' },
   { code: 'unsupported_url', pattern: /Unsupported URL/i, message: 'This URL type isn\'t supported yet. Downroad handles videos and audio. Image-only posts aren\'t supported via this method.' },
   { code: 'js_runtime_missing', pattern: /No supported JavaScript runtime|JavaScript runtime.*(?:missing|unavailable|unsupported)/i, message: 'YouTube challenge support is unavailable. Reinstall or update Downroad to restore the bundled runtime.' },
   { code: 'po_token_required', pattern: /PO Token.*(?:required|not provided|missing)|missing.*PO Token/i, message: 'YouTube rejected this playback session. Update the download engine and try again.' },
@@ -90,6 +91,16 @@ function diagnoseYtdlpError(stderr) {
     httpStatus: null,
     message: 'An unexpected download engine error occurred. Try updating it in Settings.',
   };
+}
+
+function contextualizeDiagnosis(diagnosis, { platform, cookieFile } = {}) {
+  if (diagnosis.code === 'login_required' && platform === 'youtube' && cookieFile) {
+    return {
+      ...diagnosis,
+      message: 'Your YouTube session was rejected or expired. Reconnect it in Settings, then try again.',
+    };
+  }
+  return diagnosis;
 }
 
 function mapError(stderr) {
@@ -147,23 +158,29 @@ function detectMediaType(info, platform, url) {
   return candidateFormats.some(formatHasVideo) ? 'video' : 'image';
 }
 
-function buildInfoArgs({ url, platform, ffmpegPath, denoPath = getDenoPath() }) {
+function buildInfoArgs({ url, platform, ffmpegPath, denoPath = getDenoPath(), cookieFile }) {
   return [
     '--dump-json',
     '--no-playlist',
     '--ffmpeg-location', path.dirname(ffmpegPath),
     ...youtubeRuntimeArgs(platform, denoPath),
+    ...youtubeCookieArgs(platform, cookieFile),
     platform === 'instagram' ? normalizeInstagramURL(url) : url,
   ];
 }
 
-function fetchVideoInfo(url, platform) {
+function fetchVideoInfo(url, platform, options = {}) {
   return new Promise((resolve, reject) => {
     const ytdlp = getYtdlpPath();
     const ffmpeg = getFfmpegPath();
     const fetchUrl = platform === 'instagram' ? normalizeInstagramURL(url) : url;
 
-    const args = buildInfoArgs({ url: fetchUrl, platform, ffmpegPath: ffmpeg });
+    const args = buildInfoArgs({
+      url: fetchUrl,
+      platform,
+      ffmpegPath: ffmpeg,
+      cookieFile: options.cookieFile,
+    });
 
     cleanStaleYtdlpTemp();
     const timeout = platform === 'instagram' ? 60000 : platform === 'tiktok' ? 45000 : 30000;
@@ -188,7 +205,10 @@ function fetchVideoInfo(url, platform) {
         return;
       }
       if (code !== 0) {
-        const diagnosis = diagnoseYtdlpError(stderr);
+        const diagnosis = contextualizeDiagnosis(diagnoseYtdlpError(stderr), {
+          platform,
+          cookieFile: options.cookieFile,
+        });
         const error = new Error(diagnosis.message);
         reportYtdlpFailure(error, { phase: 'fetch-info', platform, stderr, diagnosis });
         reject(error);
@@ -278,6 +298,7 @@ function buildDownloadArgs({
   ffmpegDir,
   platform,
   denoPath = getDenoPath(),
+  cookieFile,
 }) {
   // When no title is provided (instant download), let yt-dlp resolve the filename from metadata
   const safeName = title ? sanitizeFilename(title) : '';
@@ -292,6 +313,7 @@ function buildDownloadArgs({
     '--fragment-retries', '5',
     '--buffer-size', '64K',
     ...youtubeRuntimeArgs(isYouTube ? 'youtube' : platform, denoPath),
+    ...youtubeCookieArgs(isYouTube ? 'youtube' : platform, cookieFile),
   ];
 
   if (quality === 'audio') {
@@ -645,7 +667,10 @@ function startDownload(options, onProgress, onComplete, onError) {
         onComplete(filePath);
       }
     } else {
-      const diagnosis = diagnoseYtdlpError(stderrBuf);
+      const diagnosis = contextualizeDiagnosis(diagnoseYtdlpError(stderrBuf), {
+        platform: options.platform || 'youtube',
+        cookieFile: options.cookieFile,
+      });
       const error = new Error(diagnosis.message);
       reportYtdlpFailure(error, {
         phase: 'download',
@@ -843,6 +868,7 @@ module.exports = {
   buildDownloadArgs,
   buildInfoArgs,
   cleanStaleYtdlpTemp,
+  contextualizeDiagnosis,
   diagnoseYtdlpError,
   fetchCarouselVideos,
   fetchInstagramMediaViaYtdlp,

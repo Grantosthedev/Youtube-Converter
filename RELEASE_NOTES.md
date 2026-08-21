@@ -1,9 +1,9 @@
-# Downroad 1.5.3
+# Downroad 1.5.4
 
-Fixes widespread YouTube 403 download failures caused by retired player clients in stale download-engine builds.
+Fixes sudden YouTube session verification blocks and keeps the download engine ready for future platform changes.
 
-- Moves yt-dlp to a verified nightly build containing the upstream YouTube fix.
-- Bundles Deno so modern YouTube JavaScript challenges work without extra setup.
-- Adds checksum verification, atomic engine installation, and automatic rollback.
-- Correctly distinguishes 403 access failures from real 429 rate limiting.
-- Improves privacy-safe diagnostics for future platform changes.
+- Adds an explicit YouTube Session control for requests that YouTube refuses anonymously.
+- Imports only active youtube.com cookies and stores them privately inside Downroad.
+- Distinguishes a missing session from a rejected or expired session.
+- Fixes the engine updater so it follows newer checksum-verified nightly releases instead of one frozen build.
+- Clears cached metadata when the connected session changes.

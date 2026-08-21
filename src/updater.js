@@ -361,7 +361,7 @@ async function initializeYtdlpInternal() {
 async function performYtdlpUpdate() {
   try {
     const currentVersion = await getCurrentYtdlpVersion();
-    console.log(`[updater] Resolving reviewed yt-dlp ${YTDLP_CHANNEL} release`);
+    console.log(`[updater] Resolving latest yt-dlp ${YTDLP_CHANNEL} release`);
     const release = await githubGet(YTDLP_RELEASE_API);
     const asset = releaseAsset(release);
     if (!isSupportedYtdlpVersion(asset.version)) {
@@ -372,7 +372,7 @@ async function performYtdlpUpdate() {
       && isSupportedYtdlpVersion(currentVersion)
       && compareYtdlpVersions(asset.version, currentVersion) === -1
     ) {
-      console.log(`[updater] Keeping newer yt-dlp ${currentVersion}; reviewed build is ${asset.version}`);
+      console.log(`[updater] Keeping newer yt-dlp ${currentVersion}; channel build is ${asset.version}`);
       return { success: true, version: currentVersion, skipped: true };
     }
     const result = await installReleaseAsset(asset, { currentVersion });
