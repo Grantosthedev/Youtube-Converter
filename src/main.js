@@ -31,6 +31,7 @@ const {
   hasYoutubeSession,
   importYoutubeCookies,
 } = require('./youtube-session');
+const { isBenignSquirrelUpdateError } = require('./squirrel-update');
 
 setYtdlpFetcher(fetchInstagramMediaViaYtdlp);
 
@@ -38,6 +39,24 @@ let appUpdateState = { status: 'idle' };
 let githubUpdateIntervalStarted = false;
 let activeGithubCheck = null;
 let squirrelUpdater = null;
+let squirrelCheckActive = false;
+
+function requestSquirrelUpdateCheck() {
+  if (!squirrelUpdater) return false;
+  if (squirrelCheckActive) return false;
+  squirrelCheckActive = true;
+  try {
+    squirrelUpdater.checkForUpdates();
+    return true;
+  } catch (err) {
+    if (isBenignSquirrelUpdateError(err.message)) {
+      console.warn('[auto-update] Squirrel busy:', err.message);
+      return false;
+    }
+    squirrelCheckActive = false;
+    throw err;
+  }
+}
 
 function sendAppUpdateStatus(data) {
   appUpdateState = data;
@@ -66,12 +85,14 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('update-not-available', () => {
+      squirrelCheckActive = false;
       // Don't clobber a ready-to-install update with a later background check.
       if (appUpdateState.status === 'downloaded') return;
       sendAppUpdateStatus({ status: 'up-to-date' });
     });
 
     autoUpdater.on('update-downloaded', (_event, releaseNotes, releaseName) => {
+      squirrelCheckActive = false;
       const ver = (releaseName || '').replace(/^v/, '') || 'new version';
       console.log(`[auto-update] Update downloaded: ${ver}`);
       sendAppUpdateStatus({ status: 'downloaded', version: ver, method: 'squirrel' });
@@ -80,12 +101,17 @@ function setupAutoUpdater() {
     autoUpdater.on('error', (err) => {
       console.warn('[auto-update] Error:', err.message);
       if (appUpdateState.status === 'downloaded') return;
+      if (isBenignSquirrelUpdateError(err.message)) {
+        console.warn('[auto-update] Ignoring benign Squirrel error:', err.message);
+        return;
+      }
+      squirrelCheckActive = false;
       sendAppUpdateStatus({ status: 'error', error: err.message });
     });
 
-    autoUpdater.checkForUpdates();
+    requestSquirrelUpdateCheck();
     setInterval(() => {
-      try { autoUpdater.checkForUpdates(); } catch { /* ignore */ }
+      requestSquirrelUpdateCheck();
     }, 6 * 60 * 60 * 1000);
   } catch (err) {
     console.warn('[auto-update] Squirrel disabled:', err.message);
@@ -921,11 +947,25 @@ ipcMain.handle('check-app-update', async () => {
   }
 
   if (app.isPackaged && process.platform === 'darwin' && squirrelUpdater) {
+    if (
+      squirrelCheckActive
+      || appUpdateState.status === 'checking'
+      || appUpdateState.status === 'downloading'
+    ) {
+      const inProgress = appUpdateState.status === 'downloading'
+        ? { status: 'downloading' }
+        : { status: 'checking' };
+      sendAppUpdateStatus(inProgress);
+      return inProgress;
+    }
+
+    sendAppUpdateStatus({ status: 'checking' });
     try {
-      squirrelUpdater.checkForUpdates();
-      return appUpdateState;
+      requestSquirrelUpdateCheck();
+      return { status: 'checking' };
     } catch (err) {
       console.warn('[auto-update] Manual check failed:', err.message);
+      squirrelCheckActive = false;
       // Fall through to GitHub check
     }
   }

@@ -66,7 +66,7 @@ jobs:
           "$RESOURCES/deno" --version
           codesign --verify --strict --verbose=2 "$RESOURCES/yt-dlp_macos"
           "$RESOURCES/yt-dlp_macos" --js-runtimes "deno:$RESOURCES/deno" --simulate --no-playlist \
-            "https://www.youtube.com/watch?v=BaW_jenozKc"
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
       - name: Make release live
         env:
