@@ -5,7 +5,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const BIN_DIR = path.join(ROOT, 'bin');
-const RUNTIME_BINARIES = ['deno', 'yt-dlp_macos'];
+const RUNTIME_BINARIES = ['bgutil-pot', 'deno', 'yt-dlp_macos'];
 const IDENTITY = process.env.APPLE_SIGNING_IDENTITY || 'Developer ID Application';
 const ENTITLEMENTS = path.join(ROOT, 'build', 'entitlements.inherit.plist');
 

@@ -64,9 +64,29 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           codesign --verify --strict --verbose=2 "$RESOURCES/deno"
           "$RESOURCES/deno" --version
+          codesign --verify --strict --verbose=2 "$RESOURCES/bgutil-pot"
+          "$RESOURCES/bgutil-pot" --version
+          test -f "$RESOURCES/yt-dlp-plugins/bgutil-ytdlp-pot-provider-rs.zip"
           codesign --verify --strict --verbose=2 "$RESOURCES/yt-dlp_macos"
           "$RESOURCES/yt-dlp_macos" --js-runtimes "deno:$RESOURCES/deno" --simulate --no-playlist \
-            "https://www.youtube.com/watch?v=BaW_jenozKc"
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+          "$RESOURCES/bgutil-pot" server --host 127.0.0.1 --port 44167 > /tmp/downroad-pot.log 2>&1 &
+          POT_PID=$!
+          trap 'kill "$POT_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..40}; do
+            curl --fail --silent http://127.0.0.1:44167/ping && break
+            sleep 0.25
+          done
+          curl --fail --silent http://127.0.0.1:44167/ping
+          "$RESOURCES/yt-dlp_macos" \
+            --plugin-dirs "$RESOURCES/yt-dlp-plugins" \
+            --extractor-args "youtube:player_client=mweb" \
+            --extractor-args "youtubepot-bgutilhttp:base_url=http://127.0.0.1:44167" \
+            --js-runtimes "deno:$RESOURCES/deno" \
+            --simulate --no-playlist "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+          kill "$POT_PID"
+          wait "$POT_PID" || true
+          trap - EXIT
 
       - name: Make release live
         env:

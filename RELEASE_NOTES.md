@@ -1,9 +1,14 @@
-# Downroad 1.5.4
+Removes the confusing YouTube login workaround and handles modern playback checks automatically in the background.
 
-Fixes sudden YouTube session verification blocks and keeps the download engine ready for future platform changes.
-
-- Adds an explicit YouTube Session control for requests that YouTube refuses anonymously.
-- Imports only active youtube.com cookies and stores them privately inside Downroad.
-- Distinguishes a missing session from a rejected or expired session.
-- Fixes the engine updater so it follows newer checksum-verified nightly releases instead of one frozen build.
-- Clears cached metadata when the connected session changes.
+- Retries YouTube playback blocks with a local PO-token provider and the recommended mobile web client.
+- Removes the YouTube Session control, cookie import, and stored YouTube credentials.
+- Keeps normal downloads fast by starting recovery only when YouTube rejects the first request.
+- Shows the app update popup as soon as a new release is detected while the update downloads.
+- Prevents background update events from hiding an update that is already available.
+- Fixes Instagram Reels copied from the app or URL bar being classified as photos instead of video.
+- Updates Instagram metadata parsing for current GraphQL responses and mobile video fields.
+- Blocks Reel fallbacks from returning poster thumbnails as downloadable images.
+- Shows a clearer Reel-specific error when the video URL cannot be extracted.
+- Fixes TikTok metadata fetch failures caused by verification challenges and mislabeled YouTube errors.
+- Retries TikTok requests automatically and strips tracking query params from shared links.
+- Refreshes the update dialog layout, icon, and light-mode styling.

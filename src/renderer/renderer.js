@@ -16,7 +16,6 @@ const state = {
   autoPaste: true,
   showInFinder: false,
   instantDownload: false,
-  youtubeSessionConnected: false,
   queueOpen: false,
   historyOpen: false,
   historyData: [],
@@ -77,8 +76,6 @@ const settingsBackdrop = $('#settingsBackdrop');
 const autoPasteToggle = $('#autoPasteToggle');
 const showInFinderToggle = $('#showInFinderToggle');
 const instantDownloadToggle = $('#instantDownloadToggle');
-const youtubeSessionBtn = $('#youtubeSessionBtn');
-const youtubeSessionClear = $('#youtubeSessionClear');
 const modeToggle = $('#modeToggle');
 const checkUpdatesBtn = $('#checkUpdatesBtn');
 const checkUpdatesBtnLabel = checkUpdatesBtn.querySelector('span');
@@ -2093,10 +2090,6 @@ function userFacingIpcError(error, fallback) {
   return message.replace(/^Error invoking remote method '[^']+': Error:\s*/i, '');
 }
 
-function isYoutubeSessionError(message) {
-  return /(?:Connect|Reconnect) a YouTube session|YouTube session was rejected or expired/i.test(message);
-}
-
 async function fetchInfo(url) {
   if (state.isFetchingInfo) return;
   state.isFetchingInfo = true;
@@ -2167,7 +2160,7 @@ async function fetchInfo(url) {
     const message = userFacingIpcError(err, 'Failed to fetch video info.');
     showStatus('error', message);
     lastFailedUrl = url;
-    statusRetry.style.display = isYoutubeSessionError(message) ? 'none' : '';
+    statusRetry.style.display = '';
     updateDownloadBtnState();
 
     setUrlHint('');
@@ -3849,45 +3842,6 @@ if (instantDownloadToggle) {
   });
 }
 
-function updateYoutubeSessionControl() {
-  if (!youtubeSessionBtn || !youtubeSessionClear) return;
-  youtubeSessionBtn.classList.toggle('connected', state.youtubeSessionConnected);
-  youtubeSessionBtn.querySelector('span').textContent = state.youtubeSessionConnected ? 'Connected' : 'Connect';
-  youtubeSessionClear.style.display = state.youtubeSessionConnected ? '' : 'none';
-}
-
-if (youtubeSessionBtn) {
-  youtubeSessionBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const result = await window.api.selectYoutubeSession();
-    if (result.canceled) return;
-    state.youtubeSessionConnected = result.connected === true;
-    updateYoutubeSessionControl();
-    if (result.error) {
-      showStatus('error', result.error);
-      return;
-    }
-    showStatus('success', 'YouTube session connected. Anonymous-request blocks can get bent.');
-    if (lastFailedUrl && detectPlatform(lastFailedUrl) === 'youtube') {
-      const retryUrl = lastFailedUrl;
-      lastFailedUrl = '';
-      closeSettings();
-      state.isFetchingInfo = false;
-      fetchInfo(retryUrl);
-    }
-  });
-}
-
-if (youtubeSessionClear) {
-  youtubeSessionClear.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await window.api.clearYoutubeSession();
-    state.youtubeSessionConnected = false;
-    updateYoutubeSessionControl();
-    showStatus('info', 'YouTube session disconnected.');
-  });
-}
-
 modeToggle.addEventListener('click', (e) => {
   const btn = e.target.closest('.mode-switcher__btn');
   if (!btn) return;
@@ -3961,6 +3915,7 @@ let appUpdateCheckUserTriggered = false;
 let appUpdateCheckSafetyTimer = null;
 let engineUpdateSafetyTimer = null;
 let pendingUpdateCheck = null;
+let closeActiveUpdateDialog = null;
 
 function clearUpdateCheckTimers() {
   clearTimeout(appUpdateCheckSafetyTimer);
@@ -5797,7 +5752,6 @@ async function init() {
   state.autoPaste = settings.autoPaste !== false;
   state.showInFinder = settings.showInFinder === true;
   state.instantDownload = settings.instantDownload === true;
-  state.youtubeSessionConnected = settings.youtubeSessionConnected === true;
   state.mode = settings.mode || 'unhinged';
   state.theme = settings.theme || 'auto';
   state.activeProject = settings.activeProject || null;
@@ -5811,7 +5765,6 @@ async function init() {
   autoPasteToggle.classList.toggle('active', state.autoPaste);
   showInFinderToggle.classList.toggle('active', state.showInFinder);
   if (instantDownloadToggle) instantDownloadToggle.classList.toggle('active', state.instantDownload);
-  updateYoutubeSessionControl();
   updateModeSwitcher(false);
   applyTheme(state.theme, false);
   applyMode();
@@ -5873,6 +5826,11 @@ function applyAppUpdateStatus(data) {
     case 'available': {
       const wasUser = appUpdateCheckUserTriggered;
       showAppUpdateAvailable(data.version, data.url, 'github');
+      showUpdateDialog(data.version, {
+        method: 'github',
+        url: data.url,
+        autoDownloading: data.autoDownloading === true,
+      });
       if (wasUser) {
         pendingUpdateCheck = null;
         clearUpdateCheckTimers();
@@ -5965,23 +5923,49 @@ function showAppUpdateAvailable(version, url, method) {
   requestAnimationFrame(() => statusMessage.classList.add('visible'));
 }
 
-function showUpdateDialog(version) {
+function showUpdateDialog(version, options = {}) {
+  const readyToInstall = options.method !== 'github';
+  const stage = readyToInstall ? 'ready' : 'available';
   const existing = document.querySelector('.update-dialog-overlay');
-  if (existing) return;
+  if (existing?.dataset.updateStage === stage) return;
+  if (existing && closeActiveUpdateDialog) closeActiveUpdateDialog(true);
 
   const titles = {
-    unhinged: 'Fresh Update, Fam',
-    professional: 'Update Ready',
-    diabolical: 'UPDATE TIME, CHUMP',
+    unhinged: readyToInstall ? 'Fresh Update, Fam' : 'Fresh Update Spotted',
+    professional: readyToInstall ? 'Update Ready' : 'Update Available',
+    diabolical: readyToInstall ? 'UPDATE TIME, CHUMP' : 'NEW UPDATE DETECTED',
   };
   const subtitles = {
-    unhinged: `v${escapeHtml(version)} just downloaded. Restart to apply it.`,
-    professional: `Version ${escapeHtml(version)} has been downloaded and is ready to install.`,
-    diabolical: `v${escapeHtml(version)} JUST DROPPED. RESTART OR STAY OUTDATED, YOUR CALL.`,
+    unhinged: readyToInstall
+      ? `v${escapeHtml(version)} just downloaded. Restart to apply it.`
+      : options.autoDownloading
+        ? `v${escapeHtml(version)} is downloading in the background. I will yell when it is ready.`
+        : `v${escapeHtml(version)} just dropped. Open the download before this thing gets stale.`,
+    professional: readyToInstall
+      ? `Version ${escapeHtml(version)} has been downloaded and is ready to install.`
+      : options.autoDownloading
+        ? `Version ${escapeHtml(version)} is downloading in the background.`
+        : `Version ${escapeHtml(version)} is available to download.`,
+    diabolical: readyToInstall
+      ? `v${escapeHtml(version)} JUST DROPPED. RESTART OR STAY OUTDATED, YOUR CALL.`
+      : options.autoDownloading
+        ? `v${escapeHtml(version)} IS DOWNLOADING. SIT TIGHT, CHAMPION.`
+        : `v${escapeHtml(version)} EXISTS. GO GET THE DAMN UPDATE.`,
   };
+  const primaryLabel = readyToInstall
+    ? 'Restart and Update'
+    : options.autoDownloading
+      ? 'Got It'
+      : 'Open Download';
+  const primarySub = readyToInstall
+    ? 'Takes a few seconds.'
+    : options.autoDownloading
+      ? 'You can keep using Downroad.'
+      : 'Opens the official release.';
 
   const overlay = document.createElement('div');
   overlay.className = 'update-dialog-overlay';
+  overlay.dataset.updateStage = stage;
 
   overlay.innerHTML = `
     <div class="update-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="updateDialogTitle" aria-describedby="updateDialogSubtitle">
@@ -5992,8 +5976,8 @@ function showUpdateDialog(version) {
       <div id="updateDialogSubtitle" class="update-dialog__subtitle">${subtitles[state.mode] || subtitles.unhinged}</div>
       <div class="update-dialog__actions">
         <button class="update-dialog__btn update-dialog__btn--primary" data-choice="restart">
-          <span class="update-dialog__btn-label">Restart and Update</span>
-          <span class="update-dialog__btn-sub">Takes a few seconds.</span>
+          <span class="update-dialog__btn-label">${primaryLabel}</span>
+          <span class="update-dialog__btn-sub">${primarySub}</span>
         </button>
         <button class="update-dialog__cancel" data-choice="later">Later</button>
       </div>
@@ -6003,10 +5987,15 @@ function showUpdateDialog(version) {
   document.body.appendChild(overlay);
   requestAnimationFrame(() => overlay.classList.add('visible'));
 
-  function close() {
+  function close(immediate = false) {
+    if (closeActiveUpdateDialog === close) closeActiveUpdateDialog = null;
+    document.removeEventListener('keydown', onKey);
+    if (immediate) {
+      overlay.remove();
+      return;
+    }
     overlay.classList.remove('visible');
     overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
-    document.removeEventListener('keydown', onKey);
   }
 
   function onKey(e) {
@@ -6017,7 +6006,14 @@ function showUpdateDialog(version) {
     const btn = e.target.closest('[data-choice]');
     if (btn) {
       if (btn.dataset.choice === 'restart') {
-        requestInstallUpdate();
+        if (readyToInstall) {
+          requestInstallUpdate();
+        } else if (!options.autoDownloading && options.url) {
+          window.api.openExternal(options.url);
+          close();
+        } else {
+          close();
+        }
       } else {
         close();
       }
@@ -6027,6 +6023,7 @@ function showUpdateDialog(version) {
   });
 
   document.addEventListener('keydown', onKey);
+  closeActiveUpdateDialog = close;
 }
 
 init();

@@ -47,6 +47,31 @@ test('prioritizes actionable runtime and token evidence over a trailing 403', ()
   assert.equal(token.code, 'po_token_required');
 });
 
+test('identifies TikTok verification challenges without blaming YouTube', () => {
+  const diagnosis = diagnoseYtdlpError([
+    '[TikTok] Solving JS challenge using native Python implementation',
+    '[TikTok] Downloading webpage with challenge cookie',
+    'ERROR: [TikTok] 7660967336047807758: Unable to extract universal data for rehydration',
+  ].join('\n'));
+
+  assert.equal(diagnosis.code, 'tiktok_challenge');
+  assert.match(diagnosis.message, /TikTok blocked/i);
+  assert.doesNotMatch(diagnosis.message, /YouTube|player/i);
+});
+
+test('recognizes TikTok sigi failures and prioritizes a terminal 403', () => {
+  const sigi = diagnoseYtdlpError('ERROR: [TikTok] 123: Unable to extract sigi state');
+  assert.equal(sigi.code, 'tiktok_challenge');
+  assert.doesNotMatch(sigi.message, /YouTube/i);
+
+  const forbidden = diagnoseYtdlpError([
+    'WARNING: [TikTok] 123: Unable to extract sigi state',
+    'ERROR: HTTP Error 403: Forbidden',
+  ].join('\n'));
+  assert.equal(forbidden.code, 'access_forbidden');
+  assert.equal(forbidden.httpStatus, 403);
+});
+
 test('does not treat an unrelated bare Forbidden string as platform rate limiting', () => {
   const result = diagnoseYtdlpError('ERROR: Permission denied: Forbidden to write file');
   assert.equal(result.code, 'upstream_error');
@@ -86,35 +111,35 @@ test('keeps YouTube client selection under yt-dlp control', (t) => {
   assert.equal(args.some(arg => /android_vr|web_embedded/.test(arg)), false);
 });
 
-test('adds an explicitly imported session only to YouTube operations', (t) => {
+test('adds automatic recovery arguments only to YouTube operations', (t) => {
   const deno = executable(t);
-  const cookieFile = path.join(path.dirname(deno), 'youtube-cookies.txt');
-  fs.writeFileSync(cookieFile, '.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n');
+  const recoveryArgs = [
+    '--plugin-dirs', '/tmp/plugins',
+    '--extractor-args', 'youtube:player_client=mweb',
+  ];
 
   const youtubeArgs = buildInfoArgs({
     url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     platform: 'youtube',
     ffmpegPath: '/tmp/ffmpeg',
     denoPath: deno,
-    cookieFile,
+    recoveryArgs,
   });
   const instagramArgs = buildInfoArgs({
     url: 'https://www.instagram.com/reel/example/',
     platform: 'instagram',
     ffmpegPath: '/tmp/ffmpeg',
     denoPath: deno,
-    cookieFile,
+    recoveryArgs,
   });
 
-  assert.deepEqual(youtubeArgs.slice(youtubeArgs.indexOf('--cookies'), -1), ['--cookies', cookieFile]);
-  assert.equal(instagramArgs.includes('--cookies'), false);
+  assert.ok(youtubeArgs.includes('/tmp/plugins'));
+  assert.ok(youtubeArgs.includes('youtube:player_client=mweb'));
+  assert.equal(instagramArgs.includes('/tmp/plugins'), false);
 });
 
-test('distinguishes a missing session from an expired imported session', () => {
+test('reports a final playback rejection without asking for cookies', () => {
   const diagnosis = diagnoseYtdlpError('Sign in to confirm you’re not a bot');
-  assert.match(contextualizeDiagnosis(diagnosis, { platform: 'youtube' }).message, /Connect a YouTube session/);
-  assert.match(
-    contextualizeDiagnosis(diagnosis, { platform: 'youtube', cookieFile: '/tmp/cookies.txt' }).message,
-    /rejected or expired/,
-  );
+  assert.match(contextualizeDiagnosis(diagnosis).message, /automatic recovery/i);
+  assert.doesNotMatch(contextualizeDiagnosis(diagnosis).message, /cookie|connect/i);
 });

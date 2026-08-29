@@ -14,8 +14,25 @@ const BIN_DIR = path.join(__dirname, '..', 'bin');
 const YTDLP_PATH = path.join(BIN_DIR, 'yt-dlp_macos');
 const YTDLP_GZ_PATH = path.join(BIN_DIR, 'yt-dlp_macos.gz');
 const DENO_PATH = path.join(BIN_DIR, 'deno');
+const POT_PROVIDER_PATH = path.join(BIN_DIR, 'bgutil-pot');
+const POT_PLUGIN_DIR = path.join(BIN_DIR, 'yt-dlp-plugins');
+const POT_PLUGIN_PATH = path.join(POT_PLUGIN_DIR, 'bgutil-ytdlp-pot-provider-rs.zip');
 const RUNTIME_MANIFEST_PATH = path.join(BIN_DIR, 'runtime-manifest.json');
 const DENO_VERSION = '2.9.5';
+const POT_PROVIDER_VERSION = '0.8.1';
+const POT_PLUGIN_SHA256 = '99fd83b98fa93b193d6a3b69dc74410d76e7a2b889868c54d16121cac9060344';
+const POT_PROVIDER_ASSETS = {
+  arm64: {
+    name: 'bgutil-pot-macos-aarch64',
+    sha256: '34b83baf0a557fecaa6d67a8177e53e169c2ccf987182883a4bae289a7176883',
+    fileArchitecture: 'arm64',
+  },
+  x64: {
+    name: 'bgutil-pot-macos-x86_64',
+    sha256: '0391175fa938c7fabbb8b40a40bd43182ef75af97e1dd3fab56eb23b4ac3e113',
+    fileArchitecture: 'x86_64',
+  },
+};
 const DENO_ASSETS = {
   arm64: {
     name: 'deno-aarch64-apple-darwin.zip',
@@ -132,6 +149,46 @@ async function installDeno() {
   };
 }
 
+async function installPotProvider() {
+  const asset = POT_PROVIDER_ASSETS[TARGET_ARCH];
+  if (!asset) throw new Error(`Unsupported macOS architecture for PO-token provider: ${TARGET_ARCH}`);
+
+  const releaseBase = `https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/download/v${POT_PROVIDER_VERSION}`;
+  console.log(`Downloading pinned PO-token provider v${POT_PROVIDER_VERSION} for macOS ${TARGET_ARCH}...`);
+  await downloadVerified(`${releaseBase}/${asset.name}`, asset.sha256, POT_PROVIDER_PATH);
+  prepBinary(POT_PROVIDER_PATH, { requireCodeSign: process.platform === 'darwin' });
+
+  const fileOutput = execFileSync('/usr/bin/file', [POT_PROVIDER_PATH], { encoding: 'utf8' });
+  if (!fileOutput.includes('Mach-O') || !fileOutput.includes(asset.fileArchitecture)) {
+    throw new Error(`PO-token provider architecture validation failed for ${TARGET_ARCH}`);
+  }
+
+  const versionOutput = execFileSync(POT_PROVIDER_PATH, ['--version'], {
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  if (!versionOutput.includes(POT_PROVIDER_VERSION)) {
+    throw new Error(`PO-token provider returned an unexpected version: ${versionOutput.trim()}`);
+  }
+
+  fs.mkdirSync(POT_PLUGIN_DIR, { recursive: true });
+  await downloadVerified(
+    `${releaseBase}/bgutil-ytdlp-pot-provider-rs.zip`,
+    POT_PLUGIN_SHA256,
+    POT_PLUGIN_PATH,
+  );
+  fs.chmodSync(POT_PLUGIN_PATH, 0o644);
+
+  return {
+    version: POT_PROVIDER_VERSION,
+    asset: asset.name,
+    sha256: crypto.createHash('sha256').update(fs.readFileSync(POT_PROVIDER_PATH)).digest('hex'),
+    pluginSha256: POT_PLUGIN_SHA256,
+    license: 'GPL-3.0-only',
+    source: 'https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs',
+  };
+}
+
 async function download() {
   fs.mkdirSync(BIN_DIR, { recursive: true });
 
@@ -148,6 +205,7 @@ async function download() {
     createGzBundle(YTDLP_PATH, YTDLP_GZ_PATH);
 
     const deno = await installDeno();
+    const potProvider = await installPotProvider();
     fs.writeFileSync(RUNTIME_MANIFEST_PATH, `${JSON.stringify({
       ytdlp: {
         channel: 'nightly',
@@ -156,9 +214,10 @@ async function download() {
         sha256: bundledYtdlpSha256,
       },
       deno,
+      potProvider,
       architecture: TARGET_ARCH,
     }, null, 2)}\n`);
-    console.log('Verified yt-dlp and Deno runtime assets are ready.');
+    console.log('Verified yt-dlp, Deno, and PO-token recovery assets are ready.');
   } catch (err) {
     console.error('Failed to prepare download engine assets:', err.message);
     process.exit(1);

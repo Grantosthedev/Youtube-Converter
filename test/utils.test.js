@@ -7,6 +7,7 @@ const {
   isTiktokPhotoUrl,
   isValidURL,
   normalizeInstagramURL,
+  normalizeTikTokURL,
   normalizeYouTubeURL,
   sanitizeFilename,
 } = require('../src/utils');
@@ -19,7 +20,7 @@ test('detects supported platforms and rejects unrelated URLs', () => {
   assert.equal(isValidURL('https://example.com/video'), false);
 });
 
-test('normalizes YouTube and Instagram URLs without changing unsupported hosts', () => {
+test('normalizes supported URLs without changing unsupported hosts', () => {
   assert.equal(extractVideoId('https://youtube.com/watch?v=dQw4w9WgXcQ&t=30'), 'dQw4w9WgXcQ');
   assert.equal(
     normalizeYouTubeURL('https://youtu.be/dQw4w9WgXcQ?t=30'),
@@ -37,7 +38,16 @@ test('normalizes YouTube and Instagram URLs without changing unsupported hosts',
     normalizeInstagramURL('https://www.instagram.com/p/DbKz_FIMK3C/?img_index=2&igsh=tracking'),
     'https://www.instagram.com/p/DbKz_FIMK3C/?img_index=2',
   );
+  assert.equal(
+    normalizeTikTokURL('https://www.tiktok.com/@creator/video/7660967336047807758?q=search&t=123#comments'),
+    'https://www.tiktok.com/@creator/video/7660967336047807758',
+  );
+  assert.equal(
+    normalizeTikTokURL('https://vt.tiktok.com/ABC123/?_r=1'),
+    'https://vt.tiktok.com/ABC123/',
+  );
   assert.equal(normalizeInstagramURL('https://example.com/reels/ABC/'), 'https://example.com/reels/ABC/');
+  assert.equal(normalizeTikTokURL('https://example.com/video/123?q=test'), 'https://example.com/video/123?q=test');
 });
 
 test('identifies TikTok photo posts and creates safe filenames', () => {

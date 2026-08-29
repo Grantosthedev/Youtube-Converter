@@ -15,6 +15,8 @@ module.exports = {
     extraResource: [
       path.join(__dirname, 'bin', 'yt-dlp_macos'),
       path.join(__dirname, 'bin', 'deno'),
+      path.join(__dirname, 'bin', 'bgutil-pot'),
+      path.join(__dirname, 'bin', 'yt-dlp-plugins'),
       path.join(__dirname, 'bin', 'runtime-manifest.json'),
     ],
     ignore: [

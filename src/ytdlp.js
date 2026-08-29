@@ -11,7 +11,6 @@ const {
 } = require('./utils');
 const { reportError } = require('./sentry-report');
 const { YTDLP_CHANNEL } = require('./ytdlp-release');
-const { youtubeCookieArgs } = require('./youtube-session');
 const path = require('path');
 
 // Remove stale PyInstaller temp dirs (_MEI*) that accumulate when yt-dlp is
@@ -41,13 +40,16 @@ const ERROR_RULES = [
   { code: 'private_content', pattern: /private video/i, message: 'This video is private. You need access to download it.' },
   { code: 'age_restricted', pattern: /age.?restrict|age.?gate|sign in to confirm your age/i, message: 'This video is age-restricted. It cannot be downloaded without authentication.' },
   { code: 'region_blocked', pattern: /not available in your country/i, message: 'This video is not available in your region.' },
-  { code: 'login_required', pattern: /login.*page|locked behind|sign in to confirm you.re not a bot/i, message: 'YouTube blocked this anonymous request. Connect a YouTube session in Settings, then try again.' },
+  { code: 'tiktok_login_required', pattern: /\[TikTok\].*(?:requiring login|login required|logged.in users|fresh cookies)/is, message: 'TikTok requires a logged-in session for this video. Open it in TikTok to confirm it is available, then try again later.' },
+  { code: 'login_required', pattern: /login.*page|locked behind|sign in to confirm you.re not a bot/i, message: 'YouTube rejected this playback request. Downroad tried automatic recovery, but YouTube still refused it.' },
   { code: 'unsupported_url', pattern: /Unsupported URL/i, message: 'This URL type isn\'t supported yet. Downroad handles videos and audio. Image-only posts aren\'t supported via this method.' },
   { code: 'js_runtime_missing', pattern: /No supported JavaScript runtime|JavaScript runtime.*(?:missing|unavailable|unsupported)/i, message: 'YouTube challenge support is unavailable. Reinstall or update Downroad to restore the bundled runtime.' },
   { code: 'po_token_required', pattern: /PO Token.*(?:required|not provided|missing)|missing.*PO Token/i, message: 'YouTube rejected this playback session. Update the download engine and try again.' },
   { code: 'sabr_only', pattern: /SABR.*(?:only|forced)|forcing SABR/i, message: 'YouTube only offered an unsupported stream for this video. Update the download engine and try again.' },
-  { code: 'extractor_regression', pattern: /nsig extraction|signature extraction|player.*error|cipher|unable to extract|ExtractorError|extractor.*error/i, message: 'The download engine can\'t process YouTube\'s current player. Check for updates in Settings.' },
   { code: 'rate_limited', status: 429, pattern: /HTTP Error 429|429 Too Many Requests|rate.?limit/i, message: 'The platform is rate-limiting requests. Stop downloads, wait a while, then try again.' },
+  { code: 'access_forbidden', status: 403, pattern: /HTTP Error 403|\b403 Forbidden\b/i, message: 'The platform rejected this video stream. Update the download engine, then try again.' },
+  { code: 'tiktok_challenge', pattern: /\[TikTok\].*(?:Unable to extract (?:sigi state|universal data|webpage video data)|Unexpected response from webpage request|JS challenge|challenge cookie)/is, message: 'TikTok blocked this request with a temporary verification challenge. Downroad retried automatically, but TikTok still refused it. Wait a moment and try again.' },
+  { code: 'extractor_regression', pattern: /nsig extraction|signature extraction|player.*error|cipher|unable to extract|ExtractorError|extractor.*error/i, message: 'The download engine can\'t process YouTube\'s current player. Check for updates in Settings.' },
   { code: 'network_error', pattern: /urlopen error|timed out|(?:network|connection).*(?:error|refused|reset)/i, message: 'Network error. Check your internet connection and try again.' },
   { code: 'unavailable', pattern: /video.*(?:unavailable|removed|deleted|not exist)|content.*not available|currently unavailable/i, message: 'This video is unavailable or has been removed.' },
   { code: 'invalid_url', pattern: /is not a valid URL|no video/i, message: 'Please enter a valid URL.' },
@@ -55,7 +57,6 @@ const ERROR_RULES = [
   { code: 'incomplete_download', pattern: /Incomplete data|incomplete read/i, message: 'Download was interrupted. Check your connection and try again.' },
   { code: 'platform_unreachable', pattern: /unable to download webpage/i, message: 'Couldn\'t reach the platform. Check your internet or update the download engine.' },
   { code: 'engine_corrupt', pattern: /Got error.*Traceback|ModuleNotFoundError|ImportError/i, message: 'The download engine is corrupted or incompatible. Update it in Settings.' },
-  { code: 'access_forbidden', status: 403, pattern: /HTTP Error 403|\b403 Forbidden\b/i, message: 'The platform rejected this video stream. Update the download engine, then try again.' },
 ];
 
 function diagnoseYtdlpError(stderr) {
@@ -93,13 +94,7 @@ function diagnoseYtdlpError(stderr) {
   };
 }
 
-function contextualizeDiagnosis(diagnosis, { platform, cookieFile } = {}) {
-  if (diagnosis.code === 'login_required' && platform === 'youtube' && cookieFile) {
-    return {
-      ...diagnosis,
-      message: 'Your YouTube session was rejected or expired. Reconnect it in Settings, then try again.',
-    };
-  }
+function contextualizeDiagnosis(diagnosis) {
   return diagnosis;
 }
 
@@ -158,13 +153,13 @@ function detectMediaType(info, platform, url) {
   return candidateFormats.some(formatHasVideo) ? 'video' : 'image';
 }
 
-function buildInfoArgs({ url, platform, ffmpegPath, denoPath = getDenoPath(), cookieFile }) {
+function buildInfoArgs({ url, platform, ffmpegPath, denoPath = getDenoPath(), recoveryArgs = [] }) {
   return [
     '--dump-json',
     '--no-playlist',
     '--ffmpeg-location', path.dirname(ffmpegPath),
     ...youtubeRuntimeArgs(platform, denoPath),
-    ...youtubeCookieArgs(platform, cookieFile),
+    ...(platform === 'youtube' ? recoveryArgs : []),
     platform === 'instagram' ? normalizeInstagramURL(url) : url,
   ];
 }
@@ -179,11 +174,11 @@ function fetchVideoInfo(url, platform, options = {}) {
       url: fetchUrl,
       platform,
       ffmpegPath: ffmpeg,
-      cookieFile: options.cookieFile,
+      recoveryArgs: options.recoveryArgs,
     });
 
     cleanStaleYtdlpTemp();
-    const timeout = platform === 'instagram' ? 60000 : platform === 'tiktok' ? 45000 : 30000;
+    const timeout = platform === 'instagram' || platform === 'tiktok' ? 60000 : 30000;
     const proc = spawn(ytdlp, args);
     let stdout = '';
     let stderr = '';
@@ -205,11 +200,9 @@ function fetchVideoInfo(url, platform, options = {}) {
         return;
       }
       if (code !== 0) {
-        const diagnosis = contextualizeDiagnosis(diagnoseYtdlpError(stderr), {
-          platform,
-          cookieFile: options.cookieFile,
-        });
+        const diagnosis = contextualizeDiagnosis(diagnoseYtdlpError(stderr));
         const error = new Error(diagnosis.message);
+        error.code = diagnosis.code;
         reportYtdlpFailure(error, { phase: 'fetch-info', platform, stderr, diagnosis });
         reject(error);
         return;
@@ -298,7 +291,7 @@ function buildDownloadArgs({
   ffmpegDir,
   platform,
   denoPath = getDenoPath(),
-  cookieFile,
+  recoveryArgs = [],
 }) {
   // When no title is provided (instant download), let yt-dlp resolve the filename from metadata
   const safeName = title ? sanitizeFilename(title) : '';
@@ -313,7 +306,7 @@ function buildDownloadArgs({
     '--fragment-retries', '5',
     '--buffer-size', '64K',
     ...youtubeRuntimeArgs(isYouTube ? 'youtube' : platform, denoPath),
-    ...youtubeCookieArgs(isYouTube ? 'youtube' : platform, cookieFile),
+    ...(isYouTube ? recoveryArgs : []),
   ];
 
   if (quality === 'audio') {
@@ -667,11 +660,9 @@ function startDownload(options, onProgress, onComplete, onError) {
         onComplete(filePath);
       }
     } else {
-      const diagnosis = contextualizeDiagnosis(diagnoseYtdlpError(stderrBuf), {
-        platform: options.platform || 'youtube',
-        cookieFile: options.cookieFile,
-      });
+      const diagnosis = contextualizeDiagnosis(diagnoseYtdlpError(stderrBuf));
       const error = new Error(diagnosis.message);
+      error.code = diagnosis.code;
       reportYtdlpFailure(error, {
         phase: 'download',
         platform: options.platform,
@@ -679,7 +670,7 @@ function startDownload(options, onProgress, onComplete, onError) {
         stderr: stderrBuf,
         diagnosis,
       });
-      onError(error.message);
+      onError(error.message, diagnosis);
     }
   });
 

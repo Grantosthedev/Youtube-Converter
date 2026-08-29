@@ -65,7 +65,7 @@ See [RELEASING.md](RELEASING.md) for the full step-by-step guide, prerequisites,
 
 If downloads start failing, YouTube may have changed its API. Open Settings and hit **Check for updates** to refresh the yt-dlp engine.
 
-If YouTube reports that it needs a verified session, export fresh `youtube.com` cookies in Netscape format, then open Settings and choose **YouTube Session > Connect**. Downroad filters out every non-YouTube cookie and stores the result with user-only file permissions. See the [yt-dlp YouTube cookie guidance](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies) for the recommended private-window export flow.
+When YouTube rejects a normal playback request, Downroad starts its local PO-token provider and retries automatically with yt-dlp's recommended mobile web client. No browser cookies or account connection are required.
 
 ## Instagram Remote Config
 

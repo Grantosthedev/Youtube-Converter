@@ -11,8 +11,6 @@ contextBridge.exposeInMainWorld('api', {
   proxyImage: (url) => ipcRenderer.invoke('proxy-image', url),
   cancelDownload: (id) => ipcRenderer.invoke('cancel-download', id),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
-  selectYoutubeSession: () => ipcRenderer.invoke('select-youtube-session'),
-  clearYoutubeSession: () => ipcRenderer.invoke('clear-youtube-session'),
   revealInFinder: (filePath) => ipcRenderer.invoke('reveal-in-finder', filePath),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),

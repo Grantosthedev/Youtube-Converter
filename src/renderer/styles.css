@@ -1660,54 +1660,6 @@ input, button {
   cursor: default;
 }
 
-.youtube-session-control {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.youtube-session-btn,
-.youtube-session-clear {
-  height: 26px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--red-bright) 14%, transparent);
-  color: var(--red-bright);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  transition: transform 200ms var(--spring), background 150ms var(--ease);
-}
-
-.youtube-session-btn {
-  padding: 0 9px;
-}
-
-.youtube-session-clear {
-  width: 26px;
-  padding: 0;
-}
-
-.youtube-session-btn.connected {
-  background: var(--red-bright);
-  color: var(--red-dark);
-}
-
-.youtube-session-btn:hover,
-.youtube-session-clear:hover {
-  transform: scale(1.04);
-}
-
-.youtube-session-btn:active,
-.youtube-session-clear:active {
-  transform: scale(0.96);
-}
-
 /* ============================================================
    Tooltip
    ============================================================ */
@@ -4587,9 +4539,6 @@ html.light-mode {
 
 /* ---- White text that now sits on the pink containers ---- */
 html.light-mode .settings-label { color: var(--red-bright); }
-html.light-mode .youtube-session-btn.connected {
-  color: var(--white);
-}
 html.light-mode .settings-about__version,
 html.light-mode .settings-about__sep {
   color: color-mix(in srgb, var(--red-bright) 48%, var(--grey-muted));

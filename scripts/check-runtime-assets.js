@@ -10,6 +10,8 @@ const manifest = JSON.parse(fs.readFileSync(path.join(binDir, 'runtime-manifest.
 const ytdlpPath = path.join(binDir, 'yt-dlp_macos');
 const ytdlpGzPath = path.join(binDir, 'yt-dlp_macos.gz');
 const denoPath = path.join(binDir, 'deno');
+const potProviderPath = path.join(binDir, 'bgutil-pot');
+const potPluginPath = path.join(binDir, 'yt-dlp-plugins', 'bgutil-ytdlp-pot-provider-rs.zip');
 
 function sha256(data) {
   return crypto.createHash('sha256').update(data).digest('hex');
@@ -26,14 +28,25 @@ if (sha256(bundledYtdlp) !== manifest.ytdlp.sha256) {
 if (sha256(fs.readFileSync(denoPath)) !== manifest.deno.sha256) {
   throw new Error('Bundled Deno does not match runtime-manifest.json');
 }
+if (sha256(fs.readFileSync(potProviderPath)) !== manifest.potProvider.sha256) {
+  throw new Error('Bundled PO-token provider does not match runtime-manifest.json');
+}
+if (sha256(fs.readFileSync(potPluginPath)) !== manifest.potProvider.pluginSha256) {
+  throw new Error('Bundled PO-token plugin does not match runtime-manifest.json');
+}
 
 requireExecutable(ytdlpPath);
 requireExecutable(denoPath);
+requireExecutable(potProviderPath);
 
 const denoFile = execFileSync('/usr/bin/file', [denoPath], { encoding: 'utf8' });
 const expectedArchitecture = manifest.architecture === 'arm64' ? 'arm64' : 'x86_64';
 if (!denoFile.includes('Mach-O') || !denoFile.includes(expectedArchitecture)) {
   throw new Error(`Bundled Deno is not a macOS ${manifest.architecture} executable`);
+}
+const potProviderFile = execFileSync('/usr/bin/file', [potProviderPath], { encoding: 'utf8' });
+if (!potProviderFile.includes('Mach-O') || !potProviderFile.includes(expectedArchitecture)) {
+  throw new Error(`Bundled PO-token provider is not a macOS ${manifest.architecture} executable`);
 }
 
 if (process.platform === 'darwin') {
@@ -44,6 +57,13 @@ if (process.platform === 'darwin') {
   if (!denoVersion.startsWith(`deno ${manifest.deno.version}`)) {
     throw new Error('Bundled Deno version is incorrect');
   }
+  const potProviderVersion = execFileSync(potProviderPath, ['--version'], {
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  if (!potProviderVersion.includes(manifest.potProvider.version)) {
+    throw new Error('Bundled PO-token provider version is incorrect');
+  }
 }
 
-console.log(`Runtime assets verified: yt-dlp ${manifest.ytdlp.version}, Deno ${manifest.deno.version}`);
+console.log(`Runtime assets verified: yt-dlp ${manifest.ytdlp.version}, Deno ${manifest.deno.version}, PO provider ${manifest.potProvider.version}`);

@@ -59,6 +59,19 @@ function normalizeInstagramURL(url) {
   }
 }
 
+function normalizeTikTokURL(url) {
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    if (!/(^|\.)tiktok\.com$/i.test(parsed.hostname)) return trimmed;
+    parsed.hash = '';
+    parsed.search = '';
+    return parsed.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
 function sanitizeFilename(name) {
   let safe = name
     .replace(/[\x00-\x1f\x7f]/g, '')
@@ -127,6 +140,20 @@ function getDenoPath() {
   return path.join(__dirname, '..', 'bin', 'deno');
 }
 
+function getPotProviderPath() {
+  if (app?.isPackaged) {
+    return path.join(process.resourcesPath, 'bgutil-pot');
+  }
+  return path.join(__dirname, '..', 'bin', 'bgutil-pot');
+}
+
+function getYtdlpPluginDir() {
+  if (app?.isPackaged) {
+    return path.join(process.resourcesPath, 'yt-dlp-plugins');
+  }
+  return path.join(__dirname, '..', 'bin', 'yt-dlp-plugins');
+}
+
 function getRuntimeManifestPath() {
   if (app?.isPackaged) {
     return path.join(process.resourcesPath, 'runtime-manifest.json');
@@ -183,12 +210,15 @@ module.exports = {
   extractVideoId,
   normalizeYouTubeURL,
   normalizeInstagramURL,
+  normalizeTikTokURL,
   sanitizeFilename,
   getYtdlpPath,
   getBundledYtdlpPath,
   getUserBinDir,
   getFfmpegPath,
   getDenoPath,
+  getPotProviderPath,
+  getYtdlpPluginDir,
   getRuntimeManifestPath,
   getResourcePath,
   binaryExists,

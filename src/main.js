@@ -20,17 +20,18 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const Store = require('electron-store');
+const { selectAppUpdateState } = require('./app-update-state');
 const { fetchVideoInfo, startDownload, fetchCarouselVideos, fetchInstagramMediaViaYtdlp, cleanStaleYtdlpTemp } = require('./ytdlp');
 const { initializeYtdlp, updateYtdlp, getCurrentYtdlpVersion, checkAppUpdate, checkYtdlpUpdate, ensureYtdlpFresh } = require('./updater');
 const { nextEngineReadinessError } = require('./ytdlp-readiness');
 const { validateDenoRuntime } = require('./runtime-readiness');
-const { isValidURL, detectPlatform, normalizeYouTubeURL, normalizeInstagramURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
+const { isValidURL, detectPlatform, normalizeYouTubeURL, normalizeInstagramURL, normalizeTikTokURL, binaryExists, getYtdlpPath, getBundledYtdlpPath, getUserBinDir, getFfmpegPath, pathExists, checkDiskSpace, sanitizeFilename } = require('./utils');
 const { fetchMediaInfo, downloadImage, fetchImageAsDataUri, setYtdlpFetcher } = require('./media-fetcher');
 const {
-  clearYoutubeSession,
-  hasYoutubeSession,
-  importYoutubeCookies,
-} = require('./youtube-session');
+  ensureYoutubeRecovery,
+  isYoutubeRecoveryError,
+  stopYoutubeRecovery,
+} = require('./youtube-recovery');
 
 setYtdlpFetcher(fetchInstagramMediaViaYtdlp);
 
@@ -40,15 +41,17 @@ let activeGithubCheck = null;
 let squirrelUpdater = null;
 
 function sendAppUpdateStatus(data) {
-  appUpdateState = data;
+  const nextState = selectAppUpdateState(appUpdateState, data);
+  if (nextState === appUpdateState && nextState !== data) return;
+  appUpdateState = nextState;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('app-update-status', data);
+    mainWindow.webContents.send('app-update-status', appUpdateState);
   }
 }
 
 function setupAutoUpdater() {
+  setupGithubUpdateChecker().catch(() => {});
   if (!app.isPackaged || process.platform !== 'darwin') {
-    setupGithubUpdateChecker();
     return;
   }
   try {
@@ -116,6 +119,7 @@ async function runGithubUpdateCheck({ force = false } = {}) {
         version: result.version,
         url: result.url,
         method: 'github',
+        autoDownloading: Boolean(squirrelUpdater),
       });
     } else {
       sendAppUpdateStatus({ status: 'up-to-date' });
@@ -260,14 +264,25 @@ let ytdlpReadyError = null;
 let denoReadinessPromise = null;
 let denoReadyError = null;
 
-function getYoutubeCookiePath() {
-  return path.join(app.getPath('userData'), 'youtube-cookies.txt');
-}
-
-function youtubeSessionOptions(platform) {
-  if (platform !== 'youtube') return {};
-  const cookieFile = getYoutubeCookiePath();
-  return hasYoutubeSession(cookieFile) ? { cookieFile } : {};
+async function fetchVideoInfoWithRecovery(url, platform) {
+  const maxAttempts = platform === 'tiktok' ? 3 : 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fetchVideoInfo(url, platform);
+    } catch (error) {
+      if (platform === 'youtube' && isYoutubeRecoveryError(error)) {
+        console.warn(`[youtube-recovery] Retrying metadata after ${error.code}`);
+        const recoveryArgs = await ensureYoutubeRecovery();
+        return fetchVideoInfo(url, platform, { recoveryArgs });
+      }
+      if (platform !== 'tiktok' || error.code !== 'tiktok_challenge' || attempt === maxAttempts) {
+        throw error;
+      }
+      console.warn(`[tiktok-recovery] Retrying metadata after verification challenge (${attempt}/${maxAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, attempt * 500));
+    }
+  }
+  throw new Error('TikTok metadata recovery exhausted unexpectedly.');
 }
 
 async function awaitYtdlpReady(url) {
@@ -384,11 +399,11 @@ ipcMain.handle('fetch-video-info', async (_event, url) => {
     ? normalizeYouTubeURL(url)
     : platform === 'instagram'
       ? normalizeInstagramURL(url)
-      : url.trim();
+      : normalizeTikTokURL(url);
   const cacheKey = normalizedUrl;
   const fetchUrl = normalizedUrl;
 
-  const info = await fetchVideoInfo(fetchUrl, platform, youtubeSessionOptions(platform));
+  const info = await fetchVideoInfoWithRecovery(fetchUrl, platform);
 
   if (platform === 'youtube' && info.isLive) {
     throw new Error('Live streams can\'t be clipped, bitch. Wait for the stream to end like everyone else.');
@@ -458,7 +473,7 @@ ipcMain.handle('start-download', async (event, options) => {
     ? normalizeYouTubeURL(options.url)
     : platform === 'instagram'
       ? normalizeInstagramURL(options.url)
-      : options.url.trim();
+      : normalizeTikTokURL(options.url);
 
   const downloadOptions = {
     url: downloadUrl,
@@ -468,17 +483,20 @@ ipcMain.handle('start-download', async (event, options) => {
     outputPath: downloadPath,
     title: options.title || null,
     platform,
-    ...youtubeSessionOptions(platform),
   };
 
-  const proc = startDownload(
-    downloadOptions,
-    (progress) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('download-progress', { id: downloadId, ...progress });
-      }
-    },
-    (filePath) => {
+  let recoveryAttempted = false;
+  let tiktokRecoveryAttempts = 0;
+  let proc = null;
+  const startDownloadAttempt = (attemptOptions = downloadOptions) => {
+    proc = startDownload(
+      attemptOptions,
+      (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('download-progress', { id: downloadId, ...progress });
+        }
+      },
+      (filePath) => {
       const wasCancelledLate = activeDownloads.get(downloadId)?.cancelled;
       activeDownloads.delete(downloadId);
 
@@ -537,11 +555,7 @@ ipcMain.handle('start-download', async (event, options) => {
         // For instant/cache-miss downloads, do a background info fetch so the
         // history entry gets filled in with title, thumbnail, duration, etc.
         if (Object.keys(cachedInfo).length === 0) {
-          fetchVideoInfo(
-            downloadOptions.url,
-            platform,
-            youtubeSessionOptions(platform),
-          ).then(info => {
+          fetchVideoInfoWithRecovery(downloadOptions.url, platform).then(info => {
             if (!info) return;
             const hist = store.get('downloadHistory');
             const idx = hist.findIndex(e => e.id === historyEntry.id);
@@ -589,10 +603,65 @@ ipcMain.handle('start-download', async (event, options) => {
           shell.showItemInFolder(filePath);
         }
       } catch { /* history/notification must never block the completion event */ }
-    },
-    (errorMsg) => {
+      },
+      (errorMsg, diagnosis) => {
       const entry = activeDownloads.get(downloadId);
       const wasCancelled = entry?.cancelled;
+
+      if (
+        !wasCancelled
+        && platform === 'youtube'
+        && !recoveryAttempted
+        && isYoutubeRecoveryError(diagnosis)
+      ) {
+        recoveryAttempted = true;
+        console.warn(`[youtube-recovery] Retrying download after ${diagnosis.code}`);
+        ensureYoutubeRecovery()
+          .then(recoveryArgs => {
+            const current = activeDownloads.get(downloadId);
+            if (!current || current.cancelled) {
+              activeDownloads.delete(downloadId);
+              if (current?.cancelled && mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('download-cancelled', { id: downloadId });
+              }
+              return;
+            }
+            startDownloadAttempt({ ...downloadOptions, recoveryArgs });
+          })
+          .catch(error => {
+            activeDownloads.delete(downloadId);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('download-error', {
+                id: downloadId,
+                error: error.message || errorMsg,
+              });
+            }
+          });
+        return;
+      }
+
+      if (
+        !wasCancelled
+        && platform === 'tiktok'
+        && diagnosis?.code === 'tiktok_challenge'
+        && tiktokRecoveryAttempts < 2
+      ) {
+        tiktokRecoveryAttempts += 1;
+        console.warn(`[tiktok-recovery] Retrying download after verification challenge (${tiktokRecoveryAttempts}/2)`);
+        setTimeout(() => {
+          const current = activeDownloads.get(downloadId);
+          if (!current || current.cancelled) {
+            activeDownloads.delete(downloadId);
+            if (current?.cancelled && mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('download-cancelled', { id: downloadId });
+            }
+            return;
+          }
+          startDownloadAttempt();
+        }, tiktokRecoveryAttempts * 500);
+        return;
+      }
+
       activeDownloads.delete(downloadId);
 
       if (wasCancelled) {
@@ -630,10 +699,18 @@ ipcMain.handle('start-download', async (event, options) => {
         });
         notif.show();
       }
-    },
-  );
+      },
+    );
+    const current = activeDownloads.get(downloadId);
+    activeDownloads.set(downloadId, {
+      process: proc,
+      options: attemptOptions,
+      cancelled: current?.cancelled === true,
+    });
+    return proc;
+  };
 
-  activeDownloads.set(downloadId, { process: proc, options: downloadOptions, cancelled: false });
+  startDownloadAttempt();
   return { id: downloadId };
 });
 
@@ -823,34 +900,6 @@ ipcMain.handle('select-folder', async () => {
   return null;
 });
 
-ipcMain.handle('select-youtube-session', async () => {
-  const dialogOpts = {
-    properties: ['openFile'],
-    title: 'Choose exported YouTube cookies',
-    filters: [{ name: 'Netscape cookies', extensions: ['txt'] }],
-  };
-  const result = mainWindow && !mainWindow.isDestroyed()
-    ? await dialog.showOpenDialog(mainWindow, dialogOpts)
-    : await dialog.showOpenDialog(dialogOpts);
-  if (result.canceled || result.filePaths.length === 0) {
-    return { connected: hasYoutubeSession(getYoutubeCookiePath()), canceled: true };
-  }
-
-  try {
-    importYoutubeCookies(result.filePaths[0], getYoutubeCookiePath());
-    videoInfoCache.clear();
-    return { connected: true };
-  } catch (error) {
-    return { connected: false, error: error.message };
-  }
-});
-
-ipcMain.handle('clear-youtube-session', async () => {
-  clearYoutubeSession(getYoutubeCookiePath());
-  videoInfoCache.clear();
-  return { connected: false };
-});
-
 ipcMain.handle('reveal-in-finder', async (_event, filePath) => {
   if (filePath) {
     const resolved = path.resolve(filePath);
@@ -881,7 +930,6 @@ ipcMain.handle('get-settings', async () => {
     projects: store.get('projects'),
     projectHues: ensureProjectHues(),
     projectSubfolders: store.get('projectSubfolders'),
-    youtubeSessionConnected: hasYoutubeSession(getYoutubeCookiePath()),
   };
 });
 
@@ -1132,6 +1180,7 @@ const CACHE_CLEAR_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 app.on('ready', () => {
   app.setName('Downroad');
   cleanStaleYtdlpTemp();
+  try { fs.unlinkSync(path.join(app.getPath('userData'), 'youtube-cookies.txt')); } catch {}
 
   // Periodically clear the Chromium disk cache so thumbnail images and other
   // network responses don't accumulate silently over years of use.
@@ -1239,6 +1288,7 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  stopYoutubeRecovery();
   for (const [, entry] of activeDownloads) {
     try { entry.process.kill('SIGTERM'); } catch { /* already dead */ }
     setTimeout(() => {
